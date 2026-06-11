@@ -15,7 +15,7 @@ const ContactInfoItem: React.FC<ContactInfoItemProps> = ({ icon, title, children
         </span>
       </div>
       <div>
-        <h3 className="text-headline-sm text-on-surface mb-1">{title}</h3>
+        <h3 className="text-headline-sm text-primary mb-1">{title}</h3>
         <div className="text-body-md text-on-surface-variant">{children}</div>
       </div>
     </div>
@@ -25,7 +25,7 @@ const ContactInfoItem: React.FC<ContactInfoItemProps> = ({ icon, title, children
 const ContactInfo: React.FC = () => {
   return (
     <div className="lg:col-span-5">
-      <h2 className="text-headline-lg text-on-surface mb-6">Contact Details</h2>
+      <h2 className="text-headline-lg text-primary mb-6">Contact Details</h2>
 
       <div className="space-y-6 mb-10">
         <ContactInfoItem icon="call" title="Phone">
