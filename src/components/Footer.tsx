@@ -9,7 +9,7 @@ const Footer: React.FC = () => {
 
       <footer className="bg-gradient-to-b from-background via-[#aecaf2]/60 to-[#7ea8ee] dark:from-background dark:via-[#13243a]/85 dark:to-[#0f1d30] text-body-sm w-full pb-8 pt-4 px-6 md:px-12 mt-auto">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 w-full">
-          
+
           {/* Column 1: Brand info and Socials */}
           <div className="space-y-5">
             <a href="#/" className="inline-block" aria-label="Recharge Rehabilitation Home">
@@ -18,7 +18,7 @@ const Footer: React.FC = () => {
             <p className="text-on-surface-variant/90 leading-relaxed max-w-xs font-semibold text-sm">
               Compassionate, data-driven therapies designed to help children and adults achieve real-world functional milestones.
             </p>
-            
+
             {/* Social Media Links */}
             <div className="flex gap-3 pt-2">
               {/* Twitter / X */}
@@ -135,7 +135,7 @@ const Footer: React.FC = () => {
             <div className="text-[11px] font-extrabold uppercase tracking-widest text-primary">
               Our Location
             </div>
-            <div className="rounded-2xl overflow-hidden aspect-square border border-outline-variant bg-surface-container-high relative w-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-500 group">
+            <div className="rounded-2xl overflow-hidden h-40 border border-outline-variant bg-surface-container-high relative w-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-500 group">
               <iframe
                 title="Footer Google Map Location"
                 src="https://maps.google.com/maps?q=28.566385,77.3510364&t=&z=15&ie=UTF8&iwloc=&output=embed"
@@ -145,9 +145,9 @@ const Footer: React.FC = () => {
                 referrerPolicy="no-referrer-when-downgrade"
               ></iframe>
               {/* View on Google Maps overlay button */}
-              <a 
-                href="https://maps.google.com/maps?q=28.566385,77.3510364" 
-                target="_blank" 
+              <a
+                href="https://maps.google.com/maps?q=28.566385,77.3510364"
+                target="_blank"
                 rel="noopener noreferrer"
                 className="absolute bottom-3 right-3 bg-surface/90 backdrop-blur-xs text-primary font-bold text-[10px] uppercase tracking-wider py-1.5 px-3 rounded-lg shadow-sm hover:bg-primary hover:text-on-primary transition-all duration-300 flex items-center gap-1 border border-outline-variant/30 active:scale-95"
               >

@@ -58,25 +58,15 @@ const ContactInfo: React.FC = () => {
       </div>
 
       {/* Embedded Google Map */}
-      <div className="rounded-2xl overflow-hidden aspect-square border border-outline-variant bg-surface-container-high relative w-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-500 group">
+      <div className="rounded-xl overflow-hidden h-64 border border-outline-variant bg-surface-container-high relative">
         <iframe
           title="Recharge Rehab Clinic Location"
           src="https://maps.google.com/maps?q=28.566385,77.3510364&t=&z=15&ie=UTF8&iwloc=&output=embed"
-          className="w-full h-full border-0 grayscale-[50%] dark:grayscale-[70%] group-hover:grayscale-0 scale-100 group-hover:scale-105 transition-all duration-700 ease-out"
+          className="w-full h-full border-0"
           allowFullScreen
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"
         ></iframe>
-        {/* View on Google Maps overlay button */}
-        <a 
-          href="https://maps.google.com/maps?q=28.566385,77.3510364" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="absolute bottom-3 right-3 bg-surface/90 backdrop-blur-xs text-primary font-bold text-[10px] uppercase tracking-wider py-1.5 px-3 rounded-lg shadow-sm hover:bg-primary hover:text-on-primary transition-all duration-300 flex items-center gap-1 border border-outline-variant/30 active:scale-95"
-        >
-          <span className="material-symbols-outlined text-[12px]">open_in_new</span>
-          View Map
-        </a>
       </div>
     </div>
   );
