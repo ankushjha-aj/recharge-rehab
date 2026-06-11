@@ -67,21 +67,17 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '#/', onWIP
   const [activeLabel, setActiveLabel] = useState('Home');
 
   useEffect(() => {
-    const updateActive = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith('#/about')) {
-        setActiveLabel('About Us');
-      } else if (hash.startsWith('#/gallery')) {
-        setActiveLabel('Gallery');
-      } else if (hash.includes('#contact') || hash.includes('contact')) {
-        setActiveLabel('Contact Us');
-      } else {
-        setActiveLabel('Home');
-      }
-    };
-    updateActive();
-    window.addEventListener('hashchange', updateActive);
-    return () => window.removeEventListener('hashchange', updateActive);
+    // Base the active link on the actual route (the page), not the raw hash, so in-page
+    // anchors like "#approach" don't downgrade the highlight to Home.
+    if (route.startsWith('#/about')) {
+      setActiveLabel('About Us');
+    } else if (route.startsWith('#/gallery')) {
+      setActiveLabel('Gallery');
+    } else if (route.startsWith('#/contact')) {
+      setActiveLabel('Contact Us');
+    } else {
+      setActiveLabel('Home');
+    }
   }, [route]);
 
   const [isScrolled, setIsScrolled] = useState(false);

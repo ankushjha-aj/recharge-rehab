@@ -318,6 +318,65 @@ const AboutPage: React.FC<AboutPageProps> = ({ onBookConsultation }) => {
         </div>
       </section>
 
+      {/* OUR METHOD — target of the hero "Our Method" button (#approach) */}
+      <section id="approach" className="py-6 bg-background scroll-mt-20">
+        <div className="w-full px-6 md:px-12 text-center">
+          <span className="inline-block bg-primary text-on-primary text-label-md uppercase tracking-widest font-extrabold px-4 py-1.5 rounded-full mb-4 shadow-sm">
+            Method
+          </span>
+          <h2 className="text-headline-xl font-extrabold text-on-surface mb-3">
+            Our Method
+          </h2>
+          <p className="text-body-lg text-on-surface-variant max-w-2xl mx-auto mb-10">
+            A clear, collaborative path from the very first visit to lasting, real-world progress —
+            built around your child at every step.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full items-stretch text-left">
+            {[
+              {
+                num: '01',
+                icon: 'fact_check',
+                title: 'In-Depth Assessment',
+                desc: "We start with a thorough evaluation of each child's strengths, challenges, and developmental milestones to understand exactly where they are.",
+              },
+              {
+                num: '02',
+                icon: 'tune',
+                title: 'Personalized Plan',
+                desc: 'A custom therapy roadmap is designed around your child’s specific goals, pace, and interests — never a one-size-fits-all program.',
+              },
+              {
+                num: '03',
+                icon: 'diversity_3',
+                title: 'Engaging Therapy',
+                desc: 'Our specialists deliver play-based, evidence-driven sessions that feel like discovery, keeping children motivated and fully involved.',
+              },
+              {
+                num: '04',
+                icon: 'family_restroom',
+                title: 'Family Coaching & Review',
+                desc: 'We coach caregivers and review progress regularly, extending therapy into everyday home life for results that truly last.',
+              },
+            ].map((step) => (
+              <div
+                key={step.num}
+                className="bg-surface-container-lowest border border-outline-variant/60 rounded-[1.5rem] p-6 md:p-7 shadow-sm hover:shadow-lg hover:-translate-y-2 transition-all duration-300 ease-out flex flex-col"
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div className="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-primary shadow-inner">
+                    <span className="material-symbols-outlined text-[24px]">{step.icon}</span>
+                  </div>
+                  <span className="text-headline-lg font-extrabold text-primary/20 leading-none">{step.num}</span>
+                </div>
+                <h3 className="text-headline-sm font-extrabold text-on-surface mb-2">{step.title}</h3>
+                <p className="text-body-md text-on-surface-variant leading-relaxed">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Dr. Siddharth Upadhyay Detailed Info Modal */}
       {isOwnerModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setIsOwnerModalOpen(false)}>
