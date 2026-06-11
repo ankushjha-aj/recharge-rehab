@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <link id="favicon" rel="icon" type="image/png" href="/images/logo_parts/letter_0_R.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recharge Rehabilitation</title>
+    <script>
+      // Generate circular favicon using the letter_0_R logo asset
+      (function () {
+        var img = new Image();
+        img.onload = function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 64;
+          canvas.height = 64;
+          var ctx = canvas.getContext('2d');
+          
+          // Draw white circle background
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(32, 32, 32, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Draw brand-blue circular outline
+          ctx.strokeStyle = '#2f6fd0';
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(32, 32, 30.25, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          // Draw distorted R logo centered
+          ctx.drawImage(img, 12, 12, 40, 40);
+          
+          var link = document.getElementById('favicon');
+          if (link) {
+            link.href = canvas.toDataURL('image/png');
+          }
+        };
+        img.src = '/images/logo_parts/letter_0_R.png';
+      })();
+    </script>
+    <meta name="description" content="Get in touch with Recharge Rehabilitation. Book a free consultation for your child's speech, occupational, physical, or behavioral therapy needs. We respond within 24 hours." />
+    <meta name="keywords" content="pediatric therapy, speech therapy, occupational therapy, physical therapy, behavioral therapy, child rehabilitation" />
+    <script>
+      // Apply the saved (or system) theme before paint to avoid a flash of the wrong theme.
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (!stored && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

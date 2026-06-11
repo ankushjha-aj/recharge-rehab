@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"=== leftover refs exit: $? \\(1=none\\) ===\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\(require\\('/root/RECHARGE-REHAB/node_modules/three/package.json'\\).version, require\\('/root/RECHARGE-REHAB/node_modules/@react-three/fiber/package.json'\\).version\\)\")"
+    ]
+  }
+}
