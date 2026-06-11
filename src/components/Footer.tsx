@@ -33,7 +33,9 @@ const Footer: React.FC = () => {
               </a>
               {/* Instagram */}
               <a
-                href="javascript:void(0)"
+                href="https://www.instagram.com/recharge_rehab/"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-8 h-8 rounded-full bg-surface-container-high dark:bg-surface-container-low hover:bg-primary hover:text-on-primary hover:-translate-y-1 hover:scale-110 hover:rotate-6 hover:shadow-md hover:shadow-primary/20 text-primary transition-all duration-300 flex items-center justify-center border border-outline-variant/30"
                 title="Instagram"
               >
@@ -43,7 +45,9 @@ const Footer: React.FC = () => {
               </a>
               {/* LinkedIn */}
               <a
-                href="javascript:void(0)"
+                href="https://www.linkedin.com/company/recharge-rehab"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-8 h-8 rounded-full bg-surface-container-high dark:bg-surface-container-low hover:bg-primary hover:text-on-primary hover:-translate-y-1 hover:scale-110 hover:rotate-6 hover:shadow-md hover:shadow-primary/20 text-primary transition-all duration-300 flex items-center justify-center border border-outline-variant/30"
                 title="LinkedIn"
               >
