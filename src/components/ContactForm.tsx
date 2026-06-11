@@ -99,7 +99,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label
-                className="block text-label-md text-primary mb-2"
+                className="block text-label-md text-on-surface mb-2"
                 htmlFor="parentName"
               >
                 Parent/Guardian Name
@@ -117,7 +117,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
             </div>
             <div>
               <label
-                className="block text-label-md text-primary mb-2"
+                className="block text-label-md text-on-surface mb-2"
                 htmlFor="childAge"
               >
                 Child's Age
@@ -141,7 +141,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label
-                className="block text-label-md text-primary mb-2"
+                className="block text-label-md text-on-surface mb-2"
                 htmlFor="phone"
               >
                 Phone Number <span className="text-on-surface-variant text-xs font-normal">(10-digit mobile)</span>
@@ -159,7 +159,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
             </div>
             <div>
               <label
-                className="block text-label-md text-primary mb-2"
+                className="block text-label-md text-on-surface mb-2"
                 htmlFor="service"
               >
                 Service Interested In
@@ -184,8 +184,8 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
 
           {/* Message */}
           <div>
-             <label
-              className="block text-label-md text-primary mb-2"
+            <label
+              className="block text-label-md text-on-surface mb-2"
               htmlFor="message"
             >
               How can we help?
