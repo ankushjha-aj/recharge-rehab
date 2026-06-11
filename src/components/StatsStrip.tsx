@@ -59,7 +59,7 @@ const stats = [
 
 const StatsStrip: React.FC = () => {
   return (
-    <section className="bg-gradient-to-b from-background via-primary-fixed to-background py-16 px-6 md:px-12">
+    <section className="bg-background py-16 px-6 md:px-12">
       <div className="w-full">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
           {stats.map((stat, index) => (
