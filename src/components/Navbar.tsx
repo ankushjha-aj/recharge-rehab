@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import ThemeToggle from './ThemeToggle';
 
 const navLinks = [
-  { label: 'Home', href: '#/' },
-  { label: 'About Us', href: '#/about' },
-  { label: 'Services', href: '#/services' },
-  { label: 'Gallery', href: '#/gallery' },
-  { label: 'Blog', href: '#/blog' },
-  { label: 'Contact Us', href: '#/contact' },
+  { label: 'Home', href: '/' },
+  { label: 'About Us', href: '/about' },
+  { label: 'Services', href: '/services' },
+  { label: 'Gallery', href: '/gallery' },
+  { label: 'Blog', href: '/blog' },
+  { label: 'Contact Us', href: '/contact' },
 ];
 
 export const Logo: React.FC = () => {
@@ -63,17 +63,17 @@ interface NavbarProps {
   onWIP?: (pageName: string) => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '#/', onWIP }) => {
+const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP }) => {
   const [activeLabel, setActiveLabel] = useState('Home');
 
   useEffect(() => {
     // Base the active link on the actual route (the page), not the raw hash, so in-page
     // anchors like "#approach" don't downgrade the highlight to Home.
-    if (route.startsWith('#/about')) {
+    if (route.startsWith('/about')) {
       setActiveLabel('About Us');
-    } else if (route.startsWith('#/gallery')) {
+    } else if (route.startsWith('/gallery')) {
       setActiveLabel('Gallery');
-    } else if (route.startsWith('#/contact')) {
+    } else if (route.startsWith('/contact')) {
       setActiveLabel('Contact Us');
     } else {
       setActiveLabel('Home');
@@ -114,7 +114,7 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '#/', onWIP
     >
       <div className="flex justify-between items-center px-6 md:px-12 w-full h-16">
         {/* Brand Logo — full logo.png with RECHARGE + REHABILITATION */}
-        <a href="#/" className="flex items-center" aria-label="Recharge Rehabilitation Home">
+        <a href="/" className="flex items-center" aria-label="Recharge Rehabilitation Home">
           <Logo />
         </a>
 

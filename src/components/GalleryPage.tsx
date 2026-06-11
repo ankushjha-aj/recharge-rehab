@@ -285,7 +285,7 @@ const GalleryPage: React.FC<GalleryPageProps> = ({ onBookConsultation }) => {
               <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
             </button>
             <a
-              href="#/contact"
+              href="/contact"
               className="border border-primary text-primary px-7 py-3.5 rounded-full font-bold text-sm hover:bg-primary hover:text-on-primary transition-colors duration-200 flex items-center"
             >
               Contact Us

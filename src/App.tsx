@@ -8,13 +8,13 @@ import HomePage from './components/HomePage';
 import ContactPage from './components/ContactPage';
 import GalleryPage from './components/GalleryPage';
 
-// Hash routes start with "#/" so in-page anchors (e.g. "#approach") are ignored.
+// Path routes start with "/" so in-page anchors (e.g. "#approach") are ignored.
 const getRoute = () => {
-  const hash = window.location.hash;
-  if (hash.startsWith('#/about')) return '#/about';
-  if (hash.startsWith('#/contact')) return '#/contact';
-  if (hash.startsWith('#/gallery')) return '#/gallery';
-  return '#/';
+  const path = window.location.pathname;
+  if (path.startsWith('/about')) return '/about';
+  if (path.startsWith('/contact')) return '/contact';
+  if (path.startsWith('/gallery')) return '/gallery';
+  return '/';
 };
 
 function App() {
@@ -24,14 +24,31 @@ function App() {
   const [wipPageName, setWipPageName] = useState('');
 
   useEffect(() => {
-    const onHashChange = () => {
-      // Only react to real routes; leave in-page anchor scrolling to the browser.
-      if (window.location.hash.startsWith('#/')) {
+    const onPopState = () => {
+      setRoute(getRoute());
+    };
+    window.addEventListener('popstate', onPopState);
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement;
+      const anchor = target.closest('a');
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href');
+      // Intercept relative URL paths starting with '/' but not '//'
+      if (href && href.startsWith('/') && !href.startsWith('//')) {
+        e.preventDefault();
+        window.history.pushState({}, '', href);
         setRoute(getRoute());
       }
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('click', handleGlobalClick);
+
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('click', handleGlobalClick);
+    };
   }, []);
 
   useEffect(() => {
@@ -51,11 +68,11 @@ function App() {
           (a transformed ancestor becomes the sticky containing block and breaks it). */}
       <Navbar route={route} onBookConsultation={openModal} onWIP={triggerWIP} />
 
-      {route === '#/about' ? (
+      {route === '/about' ? (
         <AboutPage onBookConsultation={openModal} />
-      ) : route === '#/contact' ? (
+      ) : route === '/contact' ? (
         <ContactPage onBookConsultation={openModal} />
-      ) : route === '#/gallery' ? (
+      ) : route === '/gallery' ? (
         <GalleryPage onBookConsultation={openModal} />
       ) : (
         <HomePage onBookConsultation={openModal} />

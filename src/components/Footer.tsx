@@ -12,7 +12,7 @@ const Footer: React.FC = () => {
 
           {/* Column 1: Brand info and Socials */}
           <div className="space-y-5">
-            <a href="#/" className="inline-block" aria-label="Recharge Rehabilitation Home">
+            <a href="/" className="inline-block" aria-label="Recharge Rehabilitation Home">
               <Logo />
             </a>
             <p className="text-on-surface-variant/90 leading-relaxed max-w-xs font-semibold text-sm">
@@ -61,32 +61,32 @@ const Footer: React.FC = () => {
             </div>
             <ul className="space-y-2">
               <li>
-                <a href="#/" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   Home
                 </a>
               </li>
               <li>
-                <a href="#/about" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/about" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   About Us
                 </a>
               </li>
               <li>
-                <a href="#/services" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/services" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   Services
                 </a>
               </li>
               <li>
-                <a href="#/gallery" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/gallery" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   Gallery
                 </a>
               </li>
               <li>
-                <a href="#/blog" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/blog" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   Blog
                 </a>
               </li>
               <li>
-                <a href="#/contact" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
+                <a href="/contact" className="inline-flex items-center text-on-surface-variant hover:text-primary hover:translate-x-1.5 transition-all duration-300 font-bold text-[13px]">
                   Contact Us
                 </a>
               </li>

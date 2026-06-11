@@ -106,7 +106,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
               <p className="text-body-md text-on-surface-variant leading-relaxed">
                 Unlocking communication through articulation, fluency, and language development support.
               </p>
-              <a href="#/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
+              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
                 Learn More
                 <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
               </a>
@@ -121,7 +121,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
               <p className="text-body-md text-on-surface-variant leading-relaxed">
                 Developing independence in daily activities, motor skills, and sensory processing.
               </p>
-              <a href="#/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
+              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
                 Learn More
                 <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
               </a>
@@ -136,7 +136,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
               <p className="text-body-md text-on-surface-variant leading-relaxed">
                 Personalized learning strategies to help every child reach their academic potential.
               </p>
-              <a href="#/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
+              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
                 Learn More
                 <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
               </a>
@@ -151,7 +151,7 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
               <p className="text-body-md text-on-surface-variant leading-relaxed">
                 Empowering caregivers with emotional support and practical guidance for home.
               </p>
-              <a href="#/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
+              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
                 Learn More
                 <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
               </a>
