@@ -10,7 +10,7 @@ const navLinks = [
   { label: 'Contact Us', href: '#/contact' },
 ];
 
-const Logo: React.FC = () => {
+export const Logo: React.FC = () => {
   return (
     <div className="flex items-center gap-1 select-none" aria-label="Recharge Rehabilitation">
       {/* Circular R icon — identical to the Chrome tab favicon */}
