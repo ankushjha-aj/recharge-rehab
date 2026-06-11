@@ -135,7 +135,7 @@ const Footer: React.FC = () => {
             <div className="text-[11px] font-extrabold uppercase tracking-widest text-primary">
               Our Location
             </div>
-            <div className="rounded-2xl overflow-hidden h-40 border border-outline-variant bg-surface-container-high relative w-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-500 group">
+            <div className="rounded-2xl overflow-hidden aspect-square border border-outline-variant bg-surface-container-high relative w-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-500 group">
               <iframe
                 title="Footer Google Map Location"
                 src="https://maps.google.com/maps?q=28.566385,77.3510364&t=&z=15&ie=UTF8&iwloc=&output=embed"
