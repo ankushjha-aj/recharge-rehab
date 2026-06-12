@@ -445,6 +445,33 @@ textarea:focus {
   animation: flyRightToLeft 12s linear infinite;
 }
 
+@keyframes flyViewportLTR {
+  0% {
+    transform: translate(-10vw, 0);
+  }
+  100% {
+    transform: translate(110vw, 0);
+  }
+}
+
+@keyframes flyViewportRTL {
+  0% {
+    transform: translate(110vw, 0) scaleX(-1);
+  }
+  100% {
+    transform: translate(-10vw, 0) scaleX(-1);
+  }
+}
+
+.animate-viewport-fly-ltr {
+  animation: flyViewportLTR var(--fly-dur, 12s) linear infinite;
+}
+
+.animate-viewport-fly-rtl {
+  animation: flyViewportRTL var(--fly-dur, 12s) linear infinite;
+}
+
+
 @keyframes birdFlap {
 
   0%,

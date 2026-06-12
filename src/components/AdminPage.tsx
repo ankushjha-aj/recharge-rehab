@@ -47,6 +47,45 @@ const lettersData = [
   { id: 7, char: 'e', src: '/images/logo_parts/letter_7_e.png' },
 ];
 
+const FlyingBird: React.FC<{
+  direction: 'ltr' | 'rtl';
+  top: string;
+  color: string;
+  duration: string;
+  delay: string;
+  scale: number;
+  flapDelay?: string;
+}> = ({ direction, top, color, duration, delay, scale, flapDelay = '0s' }) => {
+  const style = {
+    position: 'absolute',
+    top,
+    '--fly-dur': duration,
+    animationDelay: delay,
+    transform: `scale(${scale})`,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      className={`pointer-events-none select-none z-0 ${
+        direction === 'ltr' ? 'animate-viewport-fly-ltr' : 'animate-viewport-fly-rtl'
+      }`}
+      style={style}
+    >
+      <svg width="24" height="12" viewBox="0 -8 24 12" className="overflow-visible">
+        <path
+          d="M 0 0 C 4 -6, 8 -6, 12 0 C 16 -6, 20 -6, 24 0 C 16 3, 8 3, 0 0 Z"
+          fill={color}
+          className="animate-bird-flap"
+          style={{
+            transformOrigin: '12px 0px',
+            animationDelay: flapDelay,
+          }}
+        />
+      </svg>
+    </div>
+  );
+};
+
 type Tab = 'requests' | 'employees' | 'availability' | 'payments';
 
 const STATUS_META: Record<BookingStatus, { label: string; cls: string }> = {
@@ -156,6 +195,22 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
 
   return (
     <div className="relative flex-grow min-h-screen overflow-hidden bg-background" style={bgStyle}>
+      {/* Background Flying Birds (All over the screen, z-0) */}
+      <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden z-0">
+        <FlyingBird direction="ltr" top="10%" color="#3B82F6" duration="15s" delay="0s" scale={0.6} />
+        <FlyingBird direction="rtl" top="18%" color="#EF4444" duration="12s" delay="2s" scale={0.7} flapDelay="0.1s" />
+        <FlyingBird direction="ltr" top="28%" color="#10B981" duration="18s" delay="5s" scale={0.5} flapDelay="0.2s" />
+        <FlyingBird direction="rtl" top="36%" color="#8B5CF6" duration="14s" delay="1s" scale={0.8} />
+        <FlyingBird direction="ltr" top="45%" color="#F59E0B" duration="13s" delay="6s" scale={0.65} flapDelay="0.15s" />
+        <FlyingBird direction="rtl" top="54%" color="#0EA5E9" duration="16s" delay="3s" scale={0.75} />
+        <FlyingBird direction="ltr" top="65%" color="#EC4899" duration="14s" delay="7s" scale={0.55} flapDelay="0.05s" />
+        <FlyingBird direction="rtl" top="73%" color="#84CC16" duration="19s" delay="4s" scale={0.6} />
+        <FlyingBird direction="ltr" top="82%" color="#14B8A6" duration="11s" delay="2.5s" scale={0.7} flapDelay="0.1s" />
+        <FlyingBird direction="rtl" top="90%" color="#F43F5E" duration="17s" delay="5.5s" scale={0.5} flapDelay="0.25s" />
+        <FlyingBird direction="ltr" top="22%" color="#3B82F6" duration="20s" delay="8s" scale={0.65} />
+        <FlyingBird direction="rtl" top="62%" color="#EF4444" duration="15s" delay="10s" scale={0.7} />
+      </div>
+
       {/* Floating Top-Right Controls: Theme Toggle & Social Links */}
       <div className="absolute top-6 right-6 z-30 flex items-center gap-3 bg-surface-container-lowest/40 backdrop-blur-md px-4 py-2 rounded-full border border-outline-variant/30 shadow-md">
         {/* Instagram */}
@@ -216,7 +271,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
           </div>
 
           {/* Center: Animated House Scene background */}
-          <div className="w-full flex-grow flex items-center justify-center opacity-[0.65] select-none pointer-events-none z-10">
+          <div className="w-full flex-grow flex items-center justify-center select-none pointer-events-none z-10">
             <HeroBanner mode="backdrop" />
           </div>
 
