@@ -175,7 +175,7 @@ const SceneBird: React.FC<SceneBirdProps> = ({
 
 interface HeroBannerProps {
   onComplete?: () => void;
-  mode?: 'home' | 'contact';
+  mode?: 'home' | 'contact' | 'backdrop';
   onBookConsultation?: () => void;
 }
 
@@ -430,11 +430,23 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
     houseTiltRef.current.x = 0;
   };
 
+  // "backdrop" mode renders only the animated scene (no brand letters, text or
+  // buttons) so other screens — e.g. the staff login — can use it as a dimmed,
+  // non-interactive background.
+  const isBackdrop = mode === 'backdrop';
+
   return (
-    <header className="bg-gradient-to-b from-primary-fixed to-background pt-8 pb-8 px-6 md:px-12 overflow-hidden relative">
+    <header
+      className={`relative overflow-hidden ${
+        isBackdrop
+          ? 'bg-transparent w-full h-full flex items-center px-0'
+          : 'bg-gradient-to-b from-primary-fixed to-background pt-8 pb-8 px-6 md:px-12'
+      }`}
+    >
       <div className="w-full">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 items-center text-left">
-          {/* Left Column: Brand & Texts */}
+        <div className={`grid items-center text-left gap-6 md:gap-8 ${isBackdrop ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-12'}`}>
+          {/* Left Column: Brand & Texts — hidden when used as a login backdrop */}
+          {!isBackdrop && (
           <div className="md:col-span-5">
             {/* Subtitle / Brand Animations */}
             <div className="flex flex-col overflow-visible max-w-[350px] sm:max-w-[600px] md:max-w-[900px]">
@@ -516,11 +528,12 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
               )}
             </div>
           </div>
+          )}
 
           {/* Right Column: SVG Scene Container (Wide Landscape, fitting right side) */}
-          <div className="md:col-span-7 relative w-full flex justify-center">
+          <div className={`relative w-full flex justify-center ${isBackdrop ? '' : 'md:col-span-7'}`}>
             <div
-              className="relative w-full max-w-[720px]"
+              className={`relative w-full ${isBackdrop ? 'max-w-[1000px]' : 'max-w-[720px]'}`}
               onPointerMove={handleScenePointerMove}
               onPointerLeave={handleScenePointerLeave}
             >

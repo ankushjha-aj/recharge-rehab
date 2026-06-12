@@ -33,6 +33,7 @@ import {
   type CsvApplyResult,
 } from '../lib/store';
 import EmployeeDashboard from './EmployeeDashboard';
+import HeroBanner from './HeroBanner';
 
 type Tab = 'requests' | 'employees' | 'availability' | 'payments';
 
@@ -112,6 +113,7 @@ const AdminPage: React.FC = () => {
 const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) => {
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -128,34 +130,93 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
     }
   };
 
+  const fieldCls =
+    'w-full bg-surface-container-lowest/60 border border-outline-variant rounded-2xl py-3.5 pl-11 pr-4 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200';
+
   return (
-    <div className="flex-grow bg-background flex items-center justify-center px-6 py-16">
-      <form onSubmit={submit} className="w-full max-w-sm bg-surface-container-lowest border border-outline-variant rounded-[2rem] p-8 shadow-md text-center">
-        <div className="w-14 h-14 rounded-2xl bg-primary-fixed grid place-items-center text-primary mx-auto mb-5">
-          <span className="material-symbols-outlined text-[28px]">lock</span>
-        </div>
-        <h1 className="text-headline-md font-extrabold text-on-surface mb-1">Staff Sign In</h1>
-        <p className="text-body-sm text-on-surface-variant mb-6">Admins and employees sign in here.</p>
-        <input
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-          placeholder="Login ID"
-          autoFocus
-          autoCapitalize="none"
-          className="w-full bg-transparent border border-outline-variant rounded-2xl py-3 px-4 text-body-md text-on-surface text-center focus:border-primary focus:ring-1 focus:ring-primary outline-none mb-3"
-        />
-        <input
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          placeholder="Password"
-          className="w-full bg-transparent border border-outline-variant rounded-2xl py-3 px-4 text-body-md text-on-surface text-center focus:border-primary focus:ring-1 focus:ring-primary outline-none mb-3"
-        />
-        {err && <p className="text-body-sm text-[#B42318] mb-3">{err}</p>}
-        <button type="submit" disabled={busy} className="w-full bg-primary text-on-primary py-3 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition-all duration-200 shadow-md disabled:opacity-60">
-          {busy ? 'Signing in…' : 'Sign In'}
-        </button>
-      </form>
+    <div className="relative flex-grow min-h-screen overflow-hidden bg-gradient-to-b from-primary-fixed to-background flex items-center justify-center px-6 py-16">
+      {/* Dimmed, non-interactive hero animation as the backdrop */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none opacity-[0.4]" aria-hidden="true">
+        <HeroBanner mode="backdrop" />
+      </div>
+      {/* Scrim pushes the scene back so the card stays the focus */}
+      <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/15 to-background/60 pointer-events-none" />
+      {/* Soft corner glows (same as the site hero) */}
+      <div className="absolute -right-16 -top-12 w-72 h-72 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+      <div className="absolute -left-20 bottom-8 w-72 h-72 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+
+      {/* Sign-in card */}
+      <div className="relative z-10 w-full max-w-lg animate-scale-bounce-in">
+        <form
+          onSubmit={submit}
+          className="bg-surface-container-lowest/80 backdrop-blur-xl border border-outline-variant/70 rounded-[2rem] p-8 md:p-11 shadow-2xl text-center"
+        >
+          {/* Brand mark with a soft glow ring */}
+          <div className="relative w-16 h-16 mx-auto mb-5">
+            <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
+            <div className="relative w-16 h-16 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
+              <span className="material-symbols-outlined text-[32px]" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
+            </div>
+          </div>
+          <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs">Recharge Rehabilitation</p>
+          <h1 className="text-headline-md font-extrabold text-on-surface mb-1.5">Staff Sign In</h1>
+          <p className="text-body-sm text-on-surface-variant mb-7">Admins and employees sign in to manage bookings and availability.</p>
+
+          <div className="space-y-3 text-left">
+            <div className="relative">
+              <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">person</span>
+              <input
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+                placeholder="Login ID"
+                autoFocus
+                autoCapitalize="none"
+                autoComplete="username"
+                className={fieldCls}
+              />
+            </div>
+            <div className="relative">
+              <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">lock</span>
+              <input
+                type={showPw ? 'text' : 'password'}
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder="Password"
+                autoComplete="current-password"
+                className={`${fieldCls} pr-11`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((s) => !s)}
+                title={showPw ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 grid place-items-center rounded-full text-on-surface-variant hover:text-primary transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">{showPw ? 'visibility_off' : 'visibility'}</span>
+              </button>
+            </div>
+          </div>
+
+          {err && (
+            <p className="flex items-center justify-center gap-1.5 text-body-sm text-[#B42318] mt-4">
+              <span className="material-symbols-outlined text-[18px]">error</span>
+              {err}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="mt-6 w-full bg-primary text-on-primary py-3.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            {busy ? 'Signing in…' : (<>Sign In <span className="material-symbols-outlined text-[18px]">arrow_forward</span></>)}
+          </button>
+        </form>
+
+        <p className="text-center text-[11px] text-on-surface-variant/70 mt-4 flex items-center justify-center gap-1.5">
+          <span className="material-symbols-outlined text-[14px]">shield</span>
+          Protected staff area · Recharge Rehabilitation
+        </p>
+      </div>
     </div>
   );
 };
