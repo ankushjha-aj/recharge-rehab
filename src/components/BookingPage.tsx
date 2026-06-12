@@ -387,7 +387,10 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
                 </div>
                 <div>
                   <label htmlFor="phone" className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-2">Phone (WhatsApp)</label>
-                  <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="10-digit mobile number" className={inputClass} />
+                  <div className="relative flex items-center">
+                    <span className="absolute left-4 text-on-surface-variant font-bold select-none text-sm">+91</span>
+                    <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} required placeholder="10-digit mobile number" className={`${inputClass} pl-12`} />
+                  </div>
                 </div>
                 <div>
                   <label htmlFor="childAge" className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-2">Child's Age</label>

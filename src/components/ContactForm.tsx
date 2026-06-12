@@ -163,16 +163,22 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
               >
                 Phone Number <span className="text-on-surface-variant text-xs font-normal">(10-digit mobile)</span>
               </label>
-              <input
-                className="w-full bg-transparent border border-outline-variant rounded-full py-3 px-6 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200"
-                id="phone"
-                name="phone"
-                placeholder="e.g. 99105 25100"
-                type="tel"
-                value={formData.phone}
-                onChange={handleChange}
-                required
-              />
+              <div className="relative flex items-center">
+                <span className="absolute left-6 text-on-surface-variant font-bold select-none text-body-md">+91</span>
+                <input
+                  className="w-full bg-transparent border border-outline-variant rounded-full py-3 pl-16 pr-6 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200"
+                  id="phone"
+                  name="phone"
+                  placeholder="9910525100"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => {
+                    const clean = e.target.value.replace(/\D/g, '').slice(0, 10);
+                    setFormData({ ...formData, phone: clean });
+                  }}
+                  required
+                />
+              </div>
             </div>
             <div>
               <label

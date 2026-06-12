@@ -34,6 +34,16 @@ import {
   updateMyProfile,
   listMySessions,
   executeDbQuery,
+  resetMyPassword,
+  applyLeave,
+  listMyLeaves,
+  listAllLeaves,
+  updateLeaveStatus,
+  markLeavesSeen,
+  punchIn,
+  getTodayAttendance,
+  type LeaveRequest,
+  type AttendanceRecord,
 } from '../lib/store';
 import HeroBanner from './HeroBanner';
 import ThemeToggle from './ThemeToggle';
@@ -96,7 +106,7 @@ const FlyingBird: React.FC<{
   );
 };
 
-type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'sessions' | 'profile';
+type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'sessions' | 'profile' | 'salary' | 'offer_letter' | 'leaves' | 'reset_password';
 
 const STATUS_META: Record<BookingStatus, { label: string; cls: string }> = {
   requested: { label: 'Requested', cls: 'bg-primary-fixed text-primary' },
@@ -653,9 +663,33 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
   // Employee-specific state
   const [mySessions, setMySessions] = useState<BookingRequest[]>([]);
   const [meUser, setMeUser] = useState<User>(user);
-  const [profileForm, setProfileForm] = useState({
-    name: user.name, gender: user.gender || '', qualifications: user.qualifications || '',
-    experience: user.experience || '', email: user.email || '', phone: user.phone || '',
+  const [myLeaves, setMyLeaves] = useState<LeaveRequest[]>([]);
+  const [allLeaves, setAllLeaves] = useState<LeaveRequest[]>([]);
+  const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
+
+  const [profileForm, setProfileForm] = useState(() => {
+    const parseJson = (str: any) => {
+      try { return str ? JSON.parse(str) : null; } catch { return null; }
+    };
+    return {
+      name: user.name,
+      gender: user.gender || '',
+      qualifications: user.qualifications || '',
+      experience: user.experience || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      profileImage: user.profileImage || '',
+      parentName: user.parentName || '',
+      parentRelation: user.parentRelation || '',
+      parentPhone: user.parentPhone || '',
+      address: user.address || '',
+      extraPhone: user.extraPhone || '',
+      isFirstJob: !!user.isFirstJob,
+      education10th: parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' },
+      education12th: parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' },
+      educationGrad: parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' },
+      pastExperience: parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' },
+    };
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSavedAt, setProfileSavedAt] = useState('');
@@ -675,12 +709,23 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
     setLoading(true);
     try {
       if (user.role === 'employee') {
-        const s = await listMySessions();
+        const [s, l, att] = await Promise.all([
+          listMySessions(),
+          listMyLeaves(),
+          getTodayAttendance().catch(() => null)
+        ]);
         setMySessions(s);
+        setMyLeaves(l);
+        setTodayAttendance(att);
       } else {
-        const [b, u] = await Promise.all([listBookings(), listUsers()]);
+        const [b, u, lr] = await Promise.all([
+          listBookings(),
+          listUsers(),
+          listAllLeaves().catch(() => [])
+        ]);
         setBookings(b);
         setUsers(u);
+        setAllLeaves(lr);
       }
     } catch (e) {
       console.error(e);
@@ -697,13 +742,17 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
   const unseen = useMemo(() => bookings.filter((b) => !b.seen), [bookings]);
   const unseenSessions = unseen.filter((b) => b.source === 'booking').length;
   const unseenConsults = unseen.filter((b) => b.source === 'consultation').length;
+  const pendingLeaves = useMemo(() => allLeaves.filter(lr => lr.status === 'pending'), [allLeaves]);
   const [noticeShown, setNoticeShown] = useState(false);
   useEffect(() => {
     if (!noticeShown && unseen.length > 0) {
       setNotice(`🔔 ${unseen.length} new since your last visit — ${unseenSessions} session${unseenSessions === 1 ? '' : 's'}, ${unseenConsults} consultation${unseenConsults === 1 ? '' : 's'}.`);
       setNoticeShown(true);
+    } else if (!noticeShown && user.role !== 'employee' && pendingLeaves.length > 0) {
+      setNotice(`🔔 There are ${pendingLeaves.length} pending leave request(s) requiring review.`);
+      setNoticeShown(true);
     }
-  }, [unseen.length, noticeShown, unseenSessions, unseenConsults]);
+  }, [unseen.length, noticeShown, unseenSessions, unseenConsults, pendingLeaves.length, user.role]);
 
   const staffName = (id: string) => (id === 'any' ? 'No preference' : users.find((u) => u.id === id)?.name ?? id);
 
@@ -712,6 +761,10 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
       return [
         { id: 'sessions' as Tab, label: 'Sessions', icon: 'today' },
         { id: 'profile' as Tab, label: 'My Profile', icon: 'person' },
+        { id: 'reset_password' as Tab, label: 'Reset Password', icon: 'lock_reset' },
+        { id: 'salary' as Tab, label: 'Salary Slip', icon: 'receipt_long' },
+        { id: 'offer_letter' as Tab, label: 'Offer Letter', icon: 'description' },
+        { id: 'leaves' as Tab, label: 'Leave Requests', icon: 'event_busy' },
       ];
     }
     return [
@@ -826,6 +879,34 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
 
           <div className="w-px h-4 bg-outline-variant/40" />
 
+          {user.role === 'employee' && (
+            <div className="flex items-center">
+              {todayAttendance ? (
+                <div className="flex items-center gap-1.5 bg-[#D1FADF] text-[#027A48] px-3.5 py-1.5 rounded-full text-xs font-bold shadow-sm select-none">
+                  <span className="material-symbols-outlined text-[16px] animate-pulse">check_circle</span>
+                  Punched In {todayAttendance.punchIn.slice(0, 5)}
+                </div>
+              ) : (
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await punchIn();
+                      setTodayAttendance(res);
+                      alert(`Punched in successfully at ${res.punchIn}! Marked as Present.`);
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : 'Punch in failed');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 bg-primary text-on-primary hover:brightness-105 active:scale-95 px-4 py-1.5 rounded-full text-xs font-black transition-all shadow-md cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">fingerprint</span>
+                  Punch In
+                </button>
+              )}
+              <div className="w-px h-4 bg-outline-variant/40 mx-3" />
+            </div>
+          )}
+
           {/* Profile Button / Dropdown */}
           <div className="relative">
             <button
@@ -932,7 +1013,9 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
               <nav className="space-y-1">
                 {tabs.map((t) => {
                   const active = tab === t.id;
-                  const badge = t.id === 'requests' ? unseen.length : 0;
+                  const badge = t.id === 'requests'
+                    ? unseen.length
+                    : (t.id === 'employees' ? pendingLeaves.length : 0);
                   return (
                     <button
                       key={t.id}
@@ -993,7 +1076,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
           {tab === 'requests' && (
             <RequestsTab bookings={bookings} staffName={staffName} isSuper={isSuper} unseenSessions={unseenSessions} unseenConsults={unseenConsults} onChange={refresh} query={query} />
           )}
-          {tab === 'employees' && <EmployeesTab users={users} me={user} isSuper={isSuper} onChange={refresh} />}
+          {tab === 'employees' && <EmployeesTab users={users} isSuper={isSuper} allLeaves={allLeaves} onChange={refresh} />}
           {tab === 'availability' && <AvailabilityTab users={users} />}
           {tab === 'payments' && <PaymentsTab bookings={bookings} onChange={refresh} />}
           {tab === 'database' && <DatabaseTab />}
@@ -1008,7 +1091,14 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
                 e.preventDefault();
                 setProfileSaving(true);
                 try {
-                  const updated = await updateMyProfile(profileForm);
+                  const payload = {
+                    ...profileForm,
+                    education10th: JSON.stringify(profileForm.education10th),
+                    education12th: JSON.stringify(profileForm.education12th),
+                    educationGrad: JSON.stringify(profileForm.educationGrad),
+                    pastExperience: JSON.stringify(profileForm.pastExperience),
+                  };
+                  const updated = await updateMyProfile(payload);
                   setMeUser(updated);
                   setProfileSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
                 } catch (err) {
@@ -1017,6 +1107,22 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
                   setProfileSaving(false);
                 }
               }}
+            />
+          )}
+          {tab === 'salary' && <EmployeeSalarySlipTab user={meUser} />}
+          {tab === 'offer_letter' && <EmployeeOfferLetterTab user={meUser} />}
+          {tab === 'reset_password' && (
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm max-w-xl">
+              <SelfPasswordResetSection />
+            </div>
+          )}
+          {tab === 'leaves' && (
+            <EmployeeLeavesTab
+              myLeaves={myLeaves}
+              allLeaves={allLeaves}
+              isSuper={isSuper}
+              user={meUser}
+              onRefresh={refresh}
             />
           )}
         </main>
@@ -1189,9 +1295,17 @@ const RequestsTab: React.FC<{
 // Employee Profile View Modal
 // ---------------------------------------------------------------------------
 const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => void }> = ({ u, onClose, onEdit }) => {
+  const parseJson = (str: any) => {
+    try { return str ? JSON.parse(str) : null; } catch { return null; }
+  };
+  const ed10 = parseJson(u.education10th);
+  const ed12 = parseJson(u.education12th);
+  const edGrad = parseJson(u.educationGrad);
+  const exp = parseJson(u.pastExperience);
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-full max-w-lg bg-surface-container-lowest border border-outline-variant rounded-[2rem] p-6 shadow-2xl relative animate-drop-down-spring" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl bg-surface-container-lowest border border-outline-variant rounded-[2rem] p-6 shadow-2xl relative animate-drop-down-spring max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* Close button at top right */}
         <button
           onClick={onClose}
@@ -1202,9 +1316,13 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
 
         {/* Header Section */}
         <div className="flex items-center gap-4 mb-6">
-          <div className="w-14 h-14 rounded-full bg-primary-fixed text-primary font-black text-xl flex items-center justify-center shadow-inner select-none">
-            {u.name ? u.name.substring(0, 2).toUpperCase() : u.id.substring(0, 2).toUpperCase()}
-          </div>
+          {u.profileImage ? (
+            <img src={u.profileImage} alt="Profile" className="w-16 h-16 rounded-full object-cover border border-outline-variant shadow-inner select-none" />
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-primary-fixed text-primary font-black text-xl flex items-center justify-center shadow-inner select-none">
+              {u.name ? u.name.substring(0, 2).toUpperCase() : u.id.substring(0, 2).toUpperCase()}
+            </div>
+          )}
           <div>
             <h3 className="text-headline-md font-extrabold text-on-surface leading-tight">{u.name || u.id}</h3>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -1218,64 +1336,167 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
           </div>
         </div>
 
-        {/* Profile Info Details Grid */}
-        <div className="border-t border-outline-variant/30 pt-4 mb-6">
-          <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3 text-xs">Profile Information</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3.5 gap-x-6 text-sm">
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Login ID</span>
-              <span className="font-semibold text-on-surface">{u.id}</span>
+        {/* Details Grid */}
+        <div className="space-y-6">
+          {/* General info */}
+          <div className="border-t border-outline-variant/30 pt-4">
+            <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3 text-xs">Profile Information</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 text-sm text-on-surface">
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Login ID</span>
+                <span className="font-semibold">{u.id}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Specialty / Role</span>
+                <span className="font-semibold">{u.specialty || ROLE_LABEL[u.role]}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Gender</span>
+                <span className="font-semibold">{u.gender || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Qualifications</span>
+                <span className="font-semibold">{u.qualifications || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Work Experience Summary</span>
+                <span className="font-semibold">{u.experience || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Email Address</span>
+                <span className="font-semibold truncate block" title={u.email}>{u.email || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Phone Number</span>
+                <span className="font-semibold">{u.phone ? `+91 ${u.phone}` : <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Alternative Phone</span>
+                <span className="font-semibold">{u.extraPhone ? `+91 ${u.extraPhone}` : <span className="text-on-surface-variant/40 italic">None</span>}</span>
+              </div>
+              <div className="sm:col-span-2">
+                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Address</span>
+                <span className="font-semibold">{u.address || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+              </div>
             </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Specialty / Role</span>
-              <span className="font-semibold text-on-surface">{u.specialty || ROLE_LABEL[u.role]}</span>
+          </div>
+
+          {/* Parent/Guardian Info */}
+          {u.role === 'employee' && (
+            <div className="border-t border-outline-variant/30 pt-4">
+              <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3 text-xs">Parent / Guardian Details</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 text-sm text-on-surface">
+                <div>
+                  <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Name</span>
+                  <span className="font-semibold">{u.parentName || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+                </div>
+                <div>
+                  <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Relation</span>
+                  <span className="font-semibold">{u.parentRelation || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Contact Phone</span>
+                  <span className="font-semibold">{u.parentPhone ? `+91 ${u.parentPhone}` : <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Gender</span>
-              <span className="font-semibold text-on-surface">{u.gender || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+          )}
+
+          {/* Education Details */}
+          {u.role === 'employee' && (
+            <div className="border-t border-outline-variant/30 pt-4">
+              <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3 text-xs">Education Records</h4>
+              <div className="space-y-3 text-xs text-on-surface">
+                {/* 10th */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/40 rounded-xl p-3">
+                  <div>
+                    <p className="font-bold text-sm">10th Standard</p>
+                    <p className="text-on-surface-variant">School/Board: {ed10?.school || '—'} · Year: {ed10?.year || '—'} · Grade: {ed10?.grade || '—'}</p>
+                  </div>
+                  {ed10?.file && (
+                    <a href={ed10.file} download={`${u.id}_10th_marksheet`} className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full font-bold flex items-center gap-1 transition-colors">
+                      <span className="material-symbols-outlined text-[14px]">download</span> Download Marksheet
+                    </a>
+                  )}
+                </div>
+                {/* 12th */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/40 rounded-xl p-3">
+                  <div>
+                    <p className="font-bold text-sm">12th Standard</p>
+                    <p className="text-on-surface-variant">School/Board: {ed12?.school || '—'} · Year: {ed12?.year || '—'} · Grade: {ed12?.grade || '—'}</p>
+                  </div>
+                  {ed12?.file && (
+                    <a href={ed12.file} download={`${u.id}_12th_marksheet`} className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full font-bold flex items-center gap-1 transition-colors">
+                      <span className="material-symbols-outlined text-[14px]">download</span> Download Marksheet
+                    </a>
+                  )}
+                </div>
+                {/* Graduation */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/40 rounded-xl p-3">
+                  <div>
+                    <p className="font-bold text-sm">{edGrad?.degree || 'Graduation / Degree'}</p>
+                    <p className="text-on-surface-variant">College/Univ: {edGrad?.school || '—'} · Year: {edGrad?.year || '—'} · Grade/GPA: {edGrad?.grade || '—'}</p>
+                  </div>
+                  {edGrad?.file && (
+                    <a href={edGrad.file} download={`${u.id}_degree_certificate`} className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full font-bold flex items-center gap-1 transition-colors">
+                      <span className="material-symbols-outlined text-[14px]">download</span> Download Degree
+                    </a>
+                  )}
+                </div>
+              </div>
             </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Qualifications</span>
-              <span className="font-semibold text-on-surface">{u.qualifications || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
+          )}
+
+          {/* Past Experience Details */}
+          {u.role === 'employee' && (
+            <div className="border-t border-outline-variant/30 pt-4">
+              <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3 text-xs">Work History Documents</h4>
+              {u.isFirstJob ? (
+                <p className="text-xs text-on-surface-variant italic">This is the employee's first job (no prior experience letter).</p>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/40 rounded-xl p-3 text-xs text-on-surface">
+                  <div>
+                    <p className="font-bold text-sm">Previous Employer: {exp?.company || '—'}</p>
+                    <p className="text-on-surface-variant">Role: {exp?.role || '—'} · Duration: {exp?.duration || '—'}</p>
+                  </div>
+                  {exp?.file && (
+                    <a href={exp.file} download={`${u.id}_experience_letter`} className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full font-bold flex items-center gap-1 transition-colors">
+                      <span className="material-symbols-outlined text-[14px]">download</span> Download Letter
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
+          )}
+
+          {/* Status info */}
+          <div className="border-t border-outline-variant/30 pt-4 flex flex-wrap justify-between items-center gap-2 text-xs">
             <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Work Experience</span>
-              <span className="font-semibold text-on-surface">{u.experience || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
-            </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Email Address</span>
-              <span className="font-semibold text-on-surface truncate block" title={u.email}>{u.email || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
-            </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Phone Number</span>
-              <span className="font-semibold text-on-surface">{u.phone || <span className="text-on-surface-variant/40 italic">Not specified</span>}</span>
-            </div>
-            <div>
-              <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Profile Status</span>
+              <span className="block font-bold text-on-surface-variant uppercase tracking-wider text-[10px]">Profile Status</span>
               <span className={`font-semibold ${u.profileComplete ? 'text-[#027A48]' : 'text-[#B54708]'}`}>
-                {u.profileComplete ? 'Completed' : 'Pending / Complete profile requested'}
+                {u.profileComplete ? 'Complete' : 'Pending profile fields completion'}
               </span>
             </div>
             {u.createdAt && (
-              <div className="sm:col-span-2">
-                <span className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Joined On</span>
-                <span className="font-semibold text-on-surface">{new Date(u.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              <div className="text-right">
+                <span className="block font-bold text-on-surface-variant uppercase tracking-wider text-[10px]">Joined On</span>
+                <span className="font-semibold">{new Date(u.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
               </div>
             )}
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="flex justify-end gap-2 border-t border-outline-variant/30 pt-4">
+        <div className="flex justify-end gap-2 border-t border-outline-variant/30 pt-4 mt-6">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-full font-bold text-sm border border-outline-variant text-on-surface-variant hover:bg-surface-container-high/20 active:scale-95 transition-all"
+            className="px-4 py-2 rounded-full font-bold text-sm border border-outline-variant text-on-surface-variant hover:bg-surface-container-high/20 active:scale-95 transition-all cursor-pointer select-none"
           >
             Close
           </button>
           <button
             onClick={onEdit}
-            className="px-5 py-2 rounded-full font-bold text-sm bg-primary text-on-primary hover:brightness-95 active:scale-95 transition-all flex items-center gap-1.5 shadow"
+            className="px-5 py-2 rounded-full font-bold text-sm bg-primary text-on-primary hover:brightness-95 active:scale-95 transition-all flex items-center gap-1.5 shadow cursor-pointer select-none"
           >
             <span className="material-symbols-outlined text-[16px]">edit</span> Edit Profile
           </button>
@@ -1330,12 +1551,24 @@ const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => voi
 // ---------------------------------------------------------------------------
 // Employees / accounts
 // ---------------------------------------------------------------------------
-const EmployeesTab: React.FC<{ users: User[]; me: User; isSuper: boolean; onChange: () => void }> = ({ users, isSuper, onChange }) => {
+const EmployeesTab: React.FC<{
+  users: User[];
+  isSuper: boolean;
+  allLeaves: LeaveRequest[];
+  onChange: () => void;
+}> = ({ users, isSuper, allLeaves, onChange }) => {
   const [form, setForm] = useState({ id: '', name: '', password: '', role: 'employee' as Role, specialty: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [viewing, setViewing] = useState<User | null>(null);
+  const [subTab, setSubTab] = useState<'accounts' | 'leaves'>('accounts');
+
+  useEffect(() => {
+    if (subTab === 'leaves') {
+      markLeavesSeen().catch(console.error);
+    }
+  }, [subTab]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1374,53 +1607,89 @@ const EmployeesTab: React.FC<{ users: User[]; me: User; isSuper: boolean; onChan
 
   const employees = users.filter((u) => u.role === 'employee');
   const admins = users.filter((u) => u.role !== 'employee');
+  const pendingLeavesCount = allLeaves.filter((l) => l.status === 'pending').length;
 
   return (
-    <div className="space-y-8">
-      {/* Create */}
-      <form onSubmit={add} className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm">
-        <h3 className="text-headline-sm font-bold text-on-surface mb-4">Create account</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <Field label="Login ID"><input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="e.g. asha" className={inputCls} /></Field>
-          <Field label="Full name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Asha Verma" className={inputCls} /></Field>
-          <Field label="Password"><input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="set a password" className={inputCls} /></Field>
-          <Field label="Role">
-            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={`${inputCls} appearance-none cursor-pointer`} disabled={!isSuper}>
-              <option value="employee">Employee</option>
-              {isSuper && <option value="admin">Admin</option>}
-              {isSuper && <option value="super_admin">Super Admin</option>}
-            </select>
-          </Field>
-          {form.role === 'employee' && (
-            <Field label="Specialty"><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} placeholder="e.g. Speech Therapist" className={inputCls} /></Field>
-          )}
-        </div>
-        {!isSuper && <p className="text-[11px] text-on-surface-variant mt-2">Admins can create employee accounts. Only the super admin can create admins.</p>}
-        {err && <p className="text-body-sm text-[#B42318] mt-2">{err}</p>}
-        <button type="submit" disabled={busy} className="mt-4 bg-primary text-on-primary px-5 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[18px]">person_add</span>{busy ? 'Creating…' : 'Create'}
+    <div className="space-y-6">
+      {/* Sub tabs switcher */}
+      <div className="flex gap-2 border-b border-outline-variant/20 pb-3 flex-wrap">
+        <button
+          onClick={() => setSubTab('accounts')}
+          className={`px-4 py-2 rounded-full font-bold text-xs transition-colors cursor-pointer ${
+            subTab === 'accounts'
+              ? 'bg-primary text-on-primary shadow-sm'
+              : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          Manage Accounts
         </button>
-      </form>
-
-      {/* Admin/super accounts */}
-      <div>
-        <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Admin accounts</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {admins.map((u) => (
-            <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
-          ))}
-        </div>
+        <button
+          onClick={() => setSubTab('leaves')}
+          className={`px-4 py-2 rounded-full font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+            subTab === 'leaves'
+              ? 'bg-primary text-on-primary shadow-sm'
+              : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          Leave Requests
+          {pendingLeavesCount > 0 && (
+            <span className="bg-[#F04438] text-white text-[9px] font-black w-4.5 h-4.5 rounded-full grid place-items-center animate-bounce">
+              {pendingLeavesCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* Employees */}
-      <div>
-        <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Employees ({employees.length})</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {employees.map((u) => (
-            <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
-          ))}
+      {subTab === 'accounts' ? (
+        <div className="space-y-8">
+          {/* Create */}
+          <form onSubmit={add} className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm">
+            <h3 className="text-headline-sm font-bold text-on-surface mb-4">Create account</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <Field label="Login ID"><input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="e.g. asha" className={inputCls} /></Field>
+              <Field label="Full name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Asha Verma" className={inputCls} /></Field>
+              <Field label="Password"><input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="set a password" className={inputCls} /></Field>
+              <Field label="Role">
+                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={`${inputCls} appearance-none cursor-pointer`} disabled={!isSuper}>
+                  <option value="employee">Employee</option>
+                  {isSuper && <option value="admin">Admin</option>}
+                  {isSuper && <option value="super_admin">Super Admin</option>}
+                </select>
+              </Field>
+              {form.role === 'employee' && (
+                <Field label="Specialty"><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} placeholder="e.g. Speech Therapist" className={inputCls} /></Field>
+              )}
+            </div>
+            {!isSuper && <p className="text-[11px] text-on-surface-variant mt-2">Admins can create employee accounts. Only the super admin can create admins.</p>}
+            {err && <p className="text-body-sm text-[#B42318] mt-2">{err}</p>}
+            <button type="submit" disabled={busy} className="mt-4 bg-primary text-on-primary px-5 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px]">person_add</span>{busy ? 'Creating…' : 'Create'}
+            </button>
+          </form>
+
+          {/* Admin/super accounts */}
+          <div>
+            <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Admin accounts</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {admins.map((u) => (
+                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
+              ))}
+            </div>
+          </div>
+
+          {/* Employees */}
+          <div>
+            <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Employees ({employees.length})</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {employees.map((u) => (
+                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <LeavesApprovalList leaves={allLeaves} isSuper={isSuper} onRefresh={onChange} />
+      )}
 
       {viewing && (
         <UserProfileModal
@@ -1434,6 +1703,113 @@ const EmployeesTab: React.FC<{ users: User[]; me: User; isSuper: boolean; onChan
       )}
 
       {editing && <EditUserModal u={editing} isSuper={isSuper} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
+    </div>
+  );
+};
+
+const LeavesApprovalList: React.FC<{
+  leaves: LeaveRequest[];
+  isSuper: boolean;
+  onRefresh: () => void;
+}> = ({ leaves, isSuper, onRefresh }) => {
+  const [acting, setActing] = useState<string | null>(null);
+
+  const handleAction = async (id: string, status: 'approved' | 'rejected') => {
+    setActing(id);
+    try {
+      await updateLeaveStatus(id, status);
+      onRefresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const pendingCount = leaves.filter((l) => l.status === 'pending').length;
+
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="text-headline-sm font-bold text-on-surface">Employee Leave Requests</h3>
+        <span className="bg-[#FEF0C7] text-[#B54708] text-xs font-bold px-3 py-1 rounded-full">{pendingCount} Pending</span>
+      </div>
+
+      {leaves.length === 0 ? (
+        <p className="text-body-sm text-on-surface-variant italic">No leave requests recorded.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-outline-variant/30 text-xs text-on-surface-variant uppercase tracking-wider">
+                <th className="py-3 px-4">Employee</th>
+                <th className="py-3 px-4">Leave Type</th>
+                <th className="py-3 px-4">Dates</th>
+                <th className="py-3 px-4">Reason</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/20 text-on-surface">
+              {leaves.map((l) => (
+                <tr key={l.id} className="hover:bg-surface-container-lowest/50 transition-colors">
+                  <td className="py-3.5 px-4">
+                    <p className="font-bold text-sm">{l.employeeName || l.userId}</p>
+                    <p className="text-[11px] text-on-surface-variant">{l.employeeSpecialty || 'Therapist'}</p>
+                  </td>
+                  <td className="py-3.5 px-4 capitalize font-semibold text-xs text-primary">{l.leaveType}</td>
+                  <td className="py-3.5 px-4 font-medium text-xs">
+                    <div>{l.startDate} to {l.endDate}</div>
+                    <div className="text-[10px] text-on-surface-variant mt-0.5">
+                      Applied {new Date(l.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    </div>
+                  </td>
+                  <td className="py-3.5 px-4 text-on-surface-variant max-w-xs truncate" title={l.reason}>
+                    {l.reason || <span className="italic opacity-50">No reason provided</span>}
+                  </td>
+                  <td className="py-3.5 px-4">
+                    <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                      l.status === 'approved' ? 'bg-[#D1FADF] text-[#027A48]' :
+                      l.status === 'rejected' ? 'bg-[#FEE4E2] text-[#B42318]' :
+                      'bg-[#FEF0C7] text-[#B54708]'
+                    }`}>
+                      {l.status}
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-4 text-right">
+                    {l.status === 'pending' ? (
+                      isSuper ? (
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            disabled={acting === l.id}
+                            onClick={() => handleAction(l.id, 'approved')}
+                            className="bg-[#D1FADF] text-[#027A48] hover:bg-[#027A48] hover:text-white px-3 py-1.5 rounded-full text-xs font-bold transition disabled:opacity-60 cursor-pointer"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            disabled={acting === l.id}
+                            onClick={() => handleAction(l.id, 'rejected')}
+                            className="bg-[#FEE4E2] text-[#B42318] hover:bg-[#B42318] hover:text-white px-3 py-1.5 rounded-full text-xs font-bold transition disabled:opacity-60 cursor-pointer"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[#B54708] font-bold bg-[#FEF0C7]/40 px-2.5 py-1 rounded-full select-none">
+                          Pending Super Admin Action
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs text-on-surface-variant font-bold capitalize select-none">Processed</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
@@ -1465,7 +1841,12 @@ const EditUserModal: React.FC<{ u: User; isSuper: boolean; onClose: () => void; 
           <Field label="Qualifications"><input value={f.qualifications} onChange={(e) => setF({ ...f, qualifications: e.target.value })} className={inputCls} /></Field>
           <Field label="Experience"><input value={f.experience} onChange={(e) => setF({ ...f, experience: e.target.value })} className={inputCls} /></Field>
           <Field label="Email"><input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} className={inputCls} /></Field>
-          <Field label="Phone"><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} className={inputCls} /></Field>
+          <Field label="Phone">
+            <div className="relative flex items-center">
+              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+              <input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} />
+            </div>
+          </Field>
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-4 py-2 rounded-full font-bold text-sm border border-outline-variant text-on-surface-variant">Cancel</button>
@@ -2038,6 +2419,134 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
 // ---------------------------------------------------------------------------
 // Employee — Profile edit view
 // ---------------------------------------------------------------------------
+const handleFileToBase64 = (file: File, callback: (base64: string) => void) => {
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    callback(reader.result as string);
+  };
+  reader.readAsDataURL(file);
+};
+
+const FileUploader: React.FC<{
+  label: string;
+  value?: string;
+  onChange: (base64: string) => void;
+}> = ({ label, value, onChange }) => {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex flex-col gap-1.5 mt-2 bg-surface-container-high/20 border border-outline-variant/30 rounded-xl p-3">
+      <span className="text-body-xs font-bold text-on-surface-variant">{label}</span>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="bg-surface-container-high hover:bg-surface-container-high/80 text-on-surface hover:text-primary border border-outline-variant/50 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer select-none"
+        >
+          Select File
+        </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileToBase64(file, onChange);
+          }}
+          className="hidden"
+          accept="image/*,application/pdf"
+        />
+        {value ? (
+          <div className="flex items-center gap-1.5 text-xs text-[#027A48] font-bold">
+            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+            File uploaded
+            <a
+              href={value}
+              download={`${label.replace(/\s+/g, '_')}_document`}
+              className="text-primary hover:underline ml-1 cursor-pointer flex items-center"
+              title="Download file"
+            >
+              <span className="material-symbols-outlined text-[14px]">download</span>
+            </a>
+          </div>
+        ) : (
+          <span className="text-body-xs text-on-surface-variant/40 italic">No file uploaded (optional)</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const SelfPasswordResetSection: React.FC = () => {
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg('');
+    if (!newPw) { alert('New password cannot be empty'); return; }
+    if (newPw !== confirmPw) { alert('Passwords do not match'); return; }
+    setBusy(true);
+    try {
+      await resetMyPassword(newPw);
+      setNewPw('');
+      setConfirmPw('');
+      setMsg('✓ Password updated successfully!');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Reset failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-headline-sm font-bold text-on-surface mb-2 flex items-center gap-1.5">
+        <span className="material-symbols-outlined text-primary text-[28px]">lock_reset</span>
+        Reset Password
+      </h3>
+      <p className="text-body-sm text-on-surface-variant">
+        Reset your own account password securely.
+      </p>
+      <form onSubmit={handleReset} className="space-y-4 max-w-md">
+        <label className="block">
+          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">New Password</span>
+          <input
+            type="password"
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
+            placeholder="Type new password"
+            className={inputCls}
+            required
+          />
+        </label>
+        <label className="block">
+          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Confirm New Password</span>
+          <input
+            type="password"
+            value={confirmPw}
+            onChange={(e) => setConfirmPw(e.target.value)}
+            placeholder="Re-type new password"
+            className={inputCls}
+            required
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={busy || !newPw || !confirmPw}
+          className="w-full bg-primary text-on-primary px-5 py-2.5 rounded-full font-bold text-sm hover:brightness-105 active:scale-95 transition disabled:opacity-60 cursor-pointer shadow"
+        >
+          {busy ? 'Updating…' : 'Change Password'}
+        </button>
+      </form>
+      {msg && <p className="text-sm text-[#027A48] font-bold mt-2">{msg}</p>}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Profile edit view
+// ---------------------------------------------------------------------------
 const EmployeeProfileTab: React.FC<{
   form: any;
   setForm: React.Dispatch<React.SetStateAction<any>>;
@@ -2046,46 +2555,649 @@ const EmployeeProfileTab: React.FC<{
   onSave: (e: React.FormEvent) => void;
 }> = ({ form, setForm, saving, savedAt, onSave }) => {
   return (
-    <form onSubmit={onSave} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm max-w-2xl">
-      <h2 className="text-headline-sm font-bold text-on-surface mb-1 flex items-center gap-2">
-        <span className="material-symbols-outlined text-primary">person</span>My profile
-      </h2>
-      <p className="text-body-sm text-on-surface-variant mb-4">
-        Your login ID, password, and specialty are managed by the clinic admin.
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Full name</span>
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Gender</span>
-          <input value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} placeholder="e.g. Female" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Qualifications</span>
-          <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })} placeholder="e.g. MASLP" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Work experience</span>
-          <input value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })} placeholder="e.g. 4 years" className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Email</span>
-          <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Phone</span>
-          <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} />
-        </label>
+    <form onSubmit={onSave} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm max-w-4xl space-y-6">
+      
+      {/* Profile Header / Photo */}
+      <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-outline-variant/30">
+        <div className="relative w-28 h-28 rounded-full border border-outline-variant overflow-hidden bg-surface-container-high/40 flex items-center justify-center">
+          {form.profileImage ? (
+            <img src={form.profileImage} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <span className="material-symbols-outlined text-[48px] text-on-surface-variant/40">person</span>
+          )}
+        </div>
+        <div className="space-y-2 text-center sm:text-left">
+          <h3 className="text-headline-sm font-bold text-on-surface">My Profile Picture</h3>
+          <p className="text-xs text-on-surface-variant max-w-md">Upload a professional headshot to display on the staff availability and bookings panel.</p>
+          <div className="flex justify-center sm:justify-start">
+            <FileUploader
+              label="Profile Photo"
+              value={form.profileImage}
+              onChange={(base64) => setForm({ ...form, profileImage: base64 })}
+            />
+          </div>
+        </div>
       </div>
-      <div className="flex items-center gap-3 mt-6">
-        <button type="submit" disabled={saving} className="bg-primary text-on-primary px-6 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60">
+
+      {/* General Personal Information */}
+      <div className="space-y-4">
+        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-primary">badge</span>
+          Personal Information
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Full name</span>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} required />
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Gender</span>
+            <input value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} placeholder="e.g. Female" className={inputCls} />
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Qualifications</span>
+            <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })} placeholder="e.g. MASLP" className={inputCls} />
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Email</span>
+            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} required />
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Phone</span>
+            <div className="relative flex items-center">
+              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
+            </div>
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Alternative Phone <span className="normal-case text-on-surface-variant/60 font-semibold">(Optional)</span></span>
+            <div className="relative flex items-center">
+              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+              <input value={form.extraPhone} onChange={(e) => setForm({ ...form, extraPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} />
+            </div>
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Address</span>
+            <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Full residential address" className={inputCls} />
+          </label>
+        </div>
+      </div>
+
+      {/* Parent Details */}
+      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
+        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-primary">family_restroom</span>
+          Parent / Guardian Information
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Parent / Guardian Name</span>
+            <input value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="Name" className={inputCls} required />
+          </label>
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Relation</span>
+            <input value={form.parentRelation} onChange={(e) => setForm({ ...form, parentRelation: e.target.value })} placeholder="e.g. Father, Mother" className={inputCls} required />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Contact Number</span>
+            <div className="relative flex items-center">
+              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+              <input value={form.parentPhone} onChange={(e) => setForm({ ...form, parentPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
+            </div>
+          </label>
+        </div>
+      </div>
+
+      {/* Education History */}
+      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
+        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-primary">school</span>
+          Education Information
+        </h3>
+
+        {/* 10th Standard */}
+        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
+          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">10th Standard / Matriculation</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
+              <input value={form.education10th.school} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, school: e.target.value } })} placeholder="e.g. CBSE / KV" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+              <input value={form.education10th.year} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, year: e.target.value } })} placeholder="e.g. 2018" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
+              <input value={form.education10th.grade} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, grade: e.target.value } })} placeholder="e.g. 92%" className={inputCls} />
+            </label>
+          </div>
+          <FileUploader
+            label="10th Marksheet"
+            value={form.education10th.file}
+            onChange={(base64) => setForm({ ...form, education10th: { ...form.education10th, file: base64 } })}
+          />
+        </div>
+
+        {/* 12th Standard */}
+        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
+          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">12th Standard / Intermediate</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
+              <input value={form.education12th.school} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, school: e.target.value } })} placeholder="e.g. CBSE" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+              <input value={form.education12th.year} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, year: e.target.value } })} placeholder="e.g. 2020" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
+              <input value={form.education12th.grade} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, grade: e.target.value } })} placeholder="e.g. 88%" className={inputCls} />
+            </label>
+          </div>
+          <FileUploader
+            label="12th Marksheet"
+            value={form.education12th.file}
+            onChange={(base64) => setForm({ ...form, education12th: { ...form.education12th, file: base64 } })}
+          />
+        </div>
+
+        {/* Graduation */}
+        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
+          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Graduation / Diploma / Postgrad</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Degree / Course</span>
+              <input value={form.educationGrad.degree} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, degree: e.target.value } })} placeholder="e.g. BASLP" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">College / University</span>
+              <input value={form.educationGrad.school} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, school: e.target.value } })} placeholder="e.g. AIISH" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+              <input value={form.educationGrad.year} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, year: e.target.value } })} placeholder="e.g. 2024" className={inputCls} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / CGPA</span>
+              <input value={form.educationGrad.grade} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, grade: e.target.value } })} placeholder="e.g. 8.5 CGPA" className={inputCls} />
+            </label>
+          </div>
+          <FileUploader
+            label="Degree Certificate"
+            value={form.educationGrad.file}
+            onChange={(base64) => setForm({ ...form, educationGrad: { ...form.educationGrad, file: base64 } })}
+          />
+        </div>
+      </div>
+
+      {/* Work Experience */}
+      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
+        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
+          <span className="material-symbols-outlined text-primary">work</span>
+          Work Experience
+        </h3>
+        
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={form.isFirstJob}
+            onChange={(e) => setForm({ ...form, isFirstJob: e.target.checked })}
+            className="w-4.5 h-4.5 border border-outline-variant rounded focus:ring-0 text-primary cursor-pointer"
+          />
+          <span className="text-body-sm font-bold text-on-surface-variant">This is my first job / I have no prior experience</span>
+        </label>
+
+        {!form.isFirstJob && (
+          <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3 animate-fade-in">
+            <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Previous Employment Details</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="block">
+                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Company / Organization</span>
+                <input value={form.pastExperience.company} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, company: e.target.value } })} placeholder="Company Name" className={inputCls} />
+              </label>
+              <label className="block">
+                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Role / Designation</span>
+                <input value={form.pastExperience.role} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, role: e.target.value } })} placeholder="e.g. Speech Therapist" className={inputCls} />
+              </label>
+              <label className="block">
+                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Duration</span>
+                <input value={form.pastExperience.duration} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, duration: e.target.value } })} placeholder="e.g. 2 years" className={inputCls} />
+              </label>
+            </div>
+            <FileUploader
+              label="Experience Letter / Relieving Letter"
+              value={form.pastExperience.file}
+              onChange={(base64) => setForm({ ...form, pastExperience: { ...form.pastExperience, file: base64 } })}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Save Button */}
+      <div className="flex items-center gap-3 pt-6 border-t border-outline-variant/30">
+        <button type="submit" disabled={saving} className="bg-primary text-on-primary px-6 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 cursor-pointer shadow-md">
           {saving ? 'Saving…' : 'Save profile'}
         </button>
         {savedAt && <span className="text-body-sm text-[#027A48]">Saved at {savedAt}</span>}
       </div>
     </form>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Salary Slips view
+// ---------------------------------------------------------------------------
+const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
+  const [selectedSlip, setSelectedSlip] = useState<{ month: string; year: number } | null>(null);
+
+  // Hardcode generated monthly slips based on current year
+  const slips = [
+    { month: 'May', year: 2026 },
+    { month: 'April', year: 2026 },
+    { month: 'March', year: 2026 },
+  ];
+
+  const printSlip = () => {
+    window.print();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm max-w-xl">
+        <h2 className="text-headline-sm font-bold text-on-surface mb-2 flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary">receipt_long</span>
+          My Salary Slips
+        </h2>
+        <p className="text-body-sm text-on-surface-variant mb-4">View and print your monthly pay slips.</p>
+        
+        <div className="space-y-2">
+          {slips.map((s) => (
+            <div
+              key={`${s.month}-${s.year}`}
+              className="flex items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/50 hover:border-primary/50 rounded-xl px-4 py-3 cursor-pointer transition-colors"
+              onClick={() => setSelectedSlip(s)}
+            >
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-primary text-[24px]">payments</span>
+                <div>
+                  <p className="font-bold text-on-surface text-sm">{s.month} {s.year}</p>
+                  <p className="text-[10px] text-on-surface-variant">Recharge Rehabilitation Pvt Ltd</p>
+                </div>
+              </div>
+              <button className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition">
+                View Payslip
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {selectedSlip && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={() => setSelectedSlip(null)}>
+          <div className="w-full max-w-2xl bg-white text-black p-8 rounded-[1.5rem] shadow-2xl relative border border-slate-300" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setSelectedSlip(null)}
+              className="absolute top-5 right-5 text-slate-500 hover:text-black border border-slate-300 p-1.5 rounded-full print:hidden hover:bg-slate-100 transition"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+            
+            <div id="salary-slip-print" className="font-sans text-slate-800 text-xs leading-relaxed space-y-6">
+              {/* Slip Header */}
+              <div className="text-center pb-4 border-b-2 border-slate-300 space-y-1">
+                <h2 className="text-lg font-black tracking-tight text-slate-900">RECHARGE REHABILITATION PRIVATE LIMITED</h2>
+                <p className="text-[10px] text-slate-500">Regd Office: Sector 5, Dwarka, New Delhi - 110075</p>
+                <h3 className="font-bold text-xs bg-slate-100 py-1 max-w-[200px] mx-auto rounded">PAYSLIP FOR {selectedSlip.month.toUpperCase()} {selectedSlip.year}</h3>
+              </div>
+
+              {/* Employee Details Grid */}
+              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-200">
+                <div className="space-y-1">
+                  <p><strong>Employee ID:</strong> {user.id.toUpperCase()}</p>
+                  <p><strong>Employee Name:</strong> {user.name || 'Staff'}</p>
+                  <p><strong>Designation:</strong> {user.specialty || 'Therapist'}</p>
+                  <p><strong>Department:</strong> Rehabilitation Services</p>
+                </div>
+                <div className="space-y-1 text-right sm:text-left">
+                  <p><strong>Days Paid:</strong> 30</p>
+                  <p><strong>Bank A/C No:</strong> ************5643</p>
+                  <p><strong>PF Account No:</strong> DL/DWA/0098765/000/0034</p>
+                  <p><strong>PAN:</strong> APM*****5D</p>
+                </div>
+              </div>
+
+              {/* Earnings & Deductions Tables */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 border-b border-slate-300 pb-4">
+                {/* Earnings */}
+                <div>
+                  <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Earnings</h4>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between"><span>Basic Pay</span><span className="font-semibold">₹35,000.00</span></div>
+                    <div className="flex justify-between"><span>House Rent Allowance (HRA)</span><span className="font-semibold">₹12,000.00</span></div>
+                    <div className="flex justify-between"><span>Conveyance Allowance</span><span className="font-semibold">₹3,000.00</span></div>
+                    <div className="flex justify-between"><span>Special Allowance</span><span className="font-semibold">₹5,000.00</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Gross Earnings</span><span>₹55,000.00</span></div>
+                  </div>
+                </div>
+                {/* Deductions */}
+                <div className="mt-4 sm:mt-0">
+                  <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Deductions</h4>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between"><span>Provident Fund (PF)</span><span className="font-semibold">₹1,800.00</span></div>
+                    <div className="flex justify-between"><span>Professional Tax</span><span className="font-semibold">₹200.00</span></div>
+                    <div className="flex justify-between"><span>TDS / Income Tax</span><span className="font-semibold">₹0.00</span></div>
+                    <div className="flex justify-between opacity-0 sm:block"><span>&nbsp;</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Total Deductions</span><span>₹2,000.00</span></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Net Pay */}
+              <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div className="text-center sm:text-left mb-2 sm:mb-0">
+                  <span className="block text-[10px] text-slate-500 uppercase font-black">Net Salary Payable</span>
+                  <span className="text-lg font-black text-slate-900">₹53,000.00</span>
+                </div>
+                <p className="text-slate-600 font-bold text-[10px] text-center sm:text-right">Rupees Fifty-Three Thousand Only</p>
+              </div>
+
+              {/* Signatures */}
+              <div className="flex justify-between pt-8 text-[10px]">
+                <div className="text-center border-t border-slate-200 pt-1.5 w-36">
+                  <p>Employee Signature</p>
+                </div>
+                <div className="text-center border-t border-slate-200 pt-1.5 w-36">
+                  <p>Authorised Signatory</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Print Button */}
+            <div className="mt-6 flex justify-end gap-2 print:hidden border-t border-slate-200 pt-4">
+              <button
+                onClick={() => setSelectedSlip(null)}
+                className="px-4 py-2 border border-slate-300 rounded-full font-bold text-xs hover:bg-slate-50 transition cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={printSlip}
+                className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">print</span>
+                Print Payslip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Offer Letter view
+// ---------------------------------------------------------------------------
+const EmployeeOfferLetterTab: React.FC<{ user: User }> = ({ user }) => {
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary">description</span>
+          My Offer Letter
+        </h2>
+        <button
+          onClick={() => window.print()}
+          className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow"
+        >
+          <span className="material-symbols-outlined text-[16px]">print</span>
+          Print/Save Document
+        </button>
+      </div>
+
+      <div id="offer-letter-print" className="bg-white text-black p-8 sm:p-12 border border-slate-200 rounded-[1.5rem] max-w-3xl shadow-md font-serif text-slate-800 leading-relaxed text-sm space-y-6">
+        {/* Company Letterhead */}
+        <div className="text-center border-b-2 border-slate-800 pb-4 space-y-1">
+          <h1 className="text-xl font-black tracking-tight text-slate-950">RECHARGE REHABILITATION PRIVATE LIMITED</h1>
+          <p className="text-[10px] text-slate-500 font-sans uppercase tracking-widest">Pediatric Therapy & Speech Rehabilitation Services</p>
+          <p className="text-[10px] text-slate-500 font-sans">Contact: contact@rechargerehab.in | Web: www.rechargerehab.in</p>
+        </div>
+
+        {/* Date / Address */}
+        <div className="space-y-1 font-sans text-xs">
+          <p className="font-bold">Date: June 1, 2026</p>
+          <p className="font-bold">To,</p>
+          <p className="font-bold text-slate-950">{user.name || 'Staff'}</p>
+          <p>{user.address || 'New Delhi, India'}</p>
+        </div>
+
+        {/* Subject */}
+        <div className="text-center font-bold underline text-slate-950 text-xs font-sans uppercase">
+          Subject: Offer of Appointment for the position of {user.specialty || 'Therapist'}
+        </div>
+
+        {/* Greeting / Body */}
+        <div className="space-y-4">
+          <p>Dear {user.name || 'Staff'},</p>
+          
+          <p>
+            With reference to your application and subsequent interview you had with us, we are pleased to offer you the appointment as **{user.specialty || 'Therapist'}** at Recharge Rehabilitation.
+          </p>
+
+          <p>
+            Your Date of Joining will be **June 15, 2026**. Your gross salary package (CTC) will be **₹6,60,000.00 per annum** (Rupees Six Lakhs Sixty Thousand Only) as agreed. Detailed annexure of compensation breakdown is attached herewith.
+          </p>
+
+          <h4 className="font-bold text-slate-950 font-sans text-xs uppercase pt-2">Terms & Conditions of Employment:</h4>
+          
+          <ul className="list-decimal pl-6 space-y-2 text-xs font-sans">
+            <li>
+              <strong>Probation Period:</strong> You will be on probation for a period of six (6) months from your date of joining. Upon successful evaluation, your employment will be confirmed in writing.
+            </li>
+            <li>
+              <strong>Working Hours:</strong> The clinic operates from 09:30 AM to 06:30 PM, Monday through Saturday.
+            </li>
+            <li>
+              <strong>Notice Period:</strong> During probation, either party can terminate the agreement with 15 days' notice. Post confirmation, the notice period will be one (1) month.
+            </li>
+            <li>
+              <strong>Confidentiality:</strong> You will maintain strict confidentiality regarding all clinical data, patient profiles, treatment records, and company operations.
+            </li>
+          </ul>
+
+          <p>
+            Please sign and return the duplicate copy of this letter as a token of your formal acceptance. We look forward to a rewarding professional relationship with you.
+          </p>
+        </div>
+
+        {/* Signatures */}
+        <div className="flex justify-between pt-12 text-xs font-sans">
+          <div className="space-y-4">
+            <p>Sincerely,</p>
+            <div className="h-8" /> {/* Placeholder for signature */}
+            <p className="font-bold text-slate-900">Dr. Ankush Jha</p>
+            <p className="text-slate-500">Founder & Director</p>
+            <p className="text-[10px] text-slate-400">Recharge Rehabilitation Pvt Ltd</p>
+          </div>
+          <div className="space-y-4 text-right self-end">
+            <div className="border-t border-slate-300 pt-2 w-48 text-center">
+              <p>Accepted By</p>
+              <p className="font-semibold text-slate-900 mt-1">{user.name || 'Staff'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Leave Requests view
+// ---------------------------------------------------------------------------
+interface EmployeeLeavesTabProps {
+  myLeaves: LeaveRequest[];
+  allLeaves: LeaveRequest[];
+  isSuper: boolean;
+  user: User;
+  onRefresh: () => void;
+}
+
+const EmployeeLeavesTab: React.FC<EmployeeLeavesTabProps> = ({ myLeaves, onRefresh }) => {
+  const [leaveType, setLeaveType] = useState('casual');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!startDate || !reason) {
+      alert('Please fill out all required fields.');
+      return;
+    }
+    const finalEndDate = endDate || startDate;
+    setSubmitting(true);
+    try {
+      await applyLeave({ leaveType, startDate, endDate: finalEndDate, reason });
+      setStartDate('');
+      setEndDate('');
+      setReason('');
+      onRefresh();
+      alert('Leave request submitted successfully!');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Submission failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      {/* Apply Leave Request Form */}
+      <div className="lg:col-span-1">
+        <form onSubmit={handleSubmit} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+          <h3 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">edit_calendar</span>
+            Apply for Leave
+          </h3>
+          <p className="text-body-sm text-on-surface-variant">Propose a leave of absence to the Super Admin.</p>
+
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Leave Type</span>
+            <select
+              value={leaveType}
+              onChange={(e) => setLeaveType(e.target.value)}
+              className={`${inputCls} appearance-none cursor-pointer`}
+            >
+              <option value="casual">Casual Leave (CL)</option>
+              <option value="sick">Sick Leave (SL)</option>
+              <option value="medical">Medical / Privilege Leave (PL)</option>
+              <option value="unpaid">Loss of Pay (LOP)</option>
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Start Date</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={inputCls}
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">End Date <span className="normal-case font-normal text-on-surface-variant/60">(Optional)</span></span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Reason</span>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              placeholder="Provide a reason for leave..."
+              className="w-full bg-transparent border border-outline-variant rounded-xl p-3 text-sm text-on-surface focus:border-primary outline-none resize-none"
+              required
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full bg-primary text-on-primary py-2.5 rounded-full font-bold text-sm hover:brightness-105 active:scale-95 transition disabled:opacity-60 cursor-pointer flex items-center justify-center gap-1.5 shadow"
+          >
+            <span className="material-symbols-outlined text-[18px]">send</span>
+            {submitting ? 'Submitting…' : 'Submit Leave Request'}
+          </button>
+        </form>
+      </div>
+
+      {/* Leave Request History */}
+      <div className="lg:col-span-2">
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+          <h3 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">calendar_month</span>
+            My Leave History
+          </h3>
+          <p className="text-body-sm text-on-surface-variant">View statuses of your current and past leave requests.</p>
+
+          {myLeaves.length === 0 ? (
+            <p className="text-body-sm text-on-surface-variant italic">No leave history found.</p>
+          ) : (
+            <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-surface-container-high border-b border-outline-variant/40">
+                  <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
+                    <th className="p-3">Dates</th>
+                    <th className="p-3">Type</th>
+                    <th className="p-3">Reason</th>
+                    <th className="p-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
+                  {myLeaves.map((l) => (
+                    <tr key={l.id} className="hover:bg-surface-container-low/20 transition-colors">
+                      <td className="p-3 font-semibold">
+                        <div>{l.startDate} to {l.endDate}</div>
+                        <div className="text-[9px] text-on-surface-variant mt-0.5">
+                          Applied {new Date(l.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                        </div>
+                      </td>
+                      <td className="p-3 capitalize font-bold text-primary">{l.leaveType}</td>
+                      <td className="p-3 text-on-surface-variant max-w-[200px] truncate" title={l.reason}>
+                        {l.reason}
+                      </td>
+                      <td className="p-3 text-right">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
+                          l.status === 'approved' ? 'bg-[#D1FADF] text-[#027A48]' :
+                          l.status === 'rejected' ? 'bg-[#FEE4E2] text-[#B42318]' :
+                          'bg-[#FEF0C7] text-[#B54708]'
+                        }`}>
+                          {l.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+    </div>
   );
 };
 

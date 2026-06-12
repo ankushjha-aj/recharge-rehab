@@ -43,6 +43,11 @@ const toUser = (r) => ({
   gender: r.gender, qualifications: r.qualifications, experience: r.experience,
   email: r.email, phone: r.phone, profileComplete: r.profile_complete,
   createdAt: isoOrNull(r.created_at),
+  profileImage: r.profile_image,
+  parentName: r.parent_name, parentRelation: r.parent_relation, parentPhone: r.parent_phone,
+  address: r.address, extraPhone: r.extra_phone,
+  education10th: r.education_10th, education12th: r.education_12th, educationGrad: r.education_grad,
+  isFirstJob: r.is_first_job, pastExperience: r.past_experience,
 });
 const toBlocked = (r) => ({ id: r.id, date: r.date, time: r.time, staffId: r.staff_id, reason: r.reason, source: r.source });
 
@@ -54,6 +59,11 @@ const BOOKING_PATCH = {
 const PROFILE_COLS = {
   name: 'name', gender: 'gender', qualifications: 'qualifications',
   experience: 'experience', email: 'email', phone: 'phone', specialty: 'specialty',
+  profileImage: 'profile_image',
+  parentName: 'parent_name', parentRelation: 'parent_relation', parentPhone: 'parent_phone',
+  address: 'address', extraPhone: 'extra_phone',
+  education10th: 'education_10th', education12th: 'education_12th', educationGrad: 'education_grad',
+  isFirstJob: 'is_first_job', pastExperience: 'past_experience',
 };
 
 async function resolveUser(token) {
@@ -84,6 +94,46 @@ const SEED_EMPLOYEES = [
 async function ensureSchema() {
   await pool.query(`ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'`);
   await pool.query(`CREATE INDEX IF NOT EXISTS blocked_date_source_idx ON blocked_slots (date, source)`);
+
+  // Update users table with new columns
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_relation TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_phone TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_phone TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS education_10th TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS education_12th TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS education_grad TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_first_job BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS past_experience TEXT`);
+
+  // Create leave_requests table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS leave_requests (
+      id            TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      leave_type    TEXT NOT NULL,
+      start_date    TEXT NOT NULL,
+      end_date      TEXT NOT NULL,
+      reason        TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'pending',
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      seen_by_admin BOOLEAN NOT NULL DEFAULT FALSE
+    )
+  `);
+
+  // Create attendance table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance (
+      id         TEXT PRIMARY KEY, -- user_id|date
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      date       TEXT NOT NULL,
+      punch_in   TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'present'
+    )
+  `);
 }
 
 async function ensureSeedUsers() {
@@ -360,6 +410,94 @@ async function listMySessions(user) {
   return rows.map(toBooking);
 }
 
+async function resetMyPassword(user, { newPassword }) {
+  if (!newPassword) throw httpErr(400, 'New password is required.');
+  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [bcrypt.hashSync(newPassword, 10), user.id]);
+  return { ok: true };
+}
+
+async function applyLeave(user, { leaveType, startDate, endDate, reason }) {
+  if (!leaveType || !startDate || !endDate) throw httpErr(400, 'Missing leave details.');
+  const id = newId();
+  await pool.query(
+    `INSERT INTO leave_requests (id, user_id, leave_type, start_date, end_date, reason)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, user.id, leaveType, startDate, endDate, reason || '']
+  );
+  return { id, userId: user.id, leaveType, startDate, endDate, reason, status: 'pending' };
+}
+
+async function listMyLeaves(user) {
+  const { rows } = await pool.query(
+    `SELECT * FROM leave_requests WHERE user_id = $1 ORDER BY start_date DESC`,
+    [user.id]
+  );
+  return rows.map(r => ({
+    id: r.id, userId: r.user_id, leaveType: r.leave_type,
+    startDate: r.start_date, endDate: r.end_date, reason: r.reason,
+    status: r.status, createdAt: isoOrNull(r.created_at), updatedAt: isoOrNull(r.updated_at),
+    seenByAdmin: r.seen_by_admin
+  }));
+}
+
+async function listAllLeaves() {
+  const { rows } = await pool.query(
+    `SELECT lr.*, u.name as employee_name, u.specialty as employee_specialty
+     FROM leave_requests lr
+     JOIN users u ON u.id = lr.user_id
+     ORDER BY lr.created_at DESC`
+  );
+  return rows.map(r => ({
+    id: r.id, userId: r.user_id, leaveType: r.leave_type,
+    startDate: r.start_date, endDate: r.end_date, reason: r.reason,
+    status: r.status, createdAt: isoOrNull(r.created_at), updatedAt: isoOrNull(r.updated_at),
+    seenByAdmin: r.seen_by_admin, employeeName: r.employee_name, employeeSpecialty: r.employee_specialty
+  }));
+}
+
+async function updateLeaveStatus(actor, { id, status }) {
+  if (actor.role !== 'super_admin') throw httpErr(403, 'Only the super admin can approve/reject leaves.');
+  await pool.query(
+    `UPDATE leave_requests SET status = $1, updated_at = now() WHERE id = $2`,
+    [status, id]
+  );
+  return { id, status };
+}
+
+async function markLeavesSeen() {
+  await pool.query(`UPDATE leave_requests SET seen_by_admin = TRUE`);
+  return { ok: true };
+}
+
+async function punchIn(user) {
+  const date = new Date().toISOString().slice(0, 10);
+  const time = new Date().toTimeString().slice(0, 8);
+  const id = `${user.id}|${date}`;
+  await pool.query(
+    `INSERT INTO attendance (id, user_id, date, punch_in)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO NOTHING`,
+    [id, user.id, date, time]
+  );
+  return { date, time, status: 'present' };
+}
+
+async function getTodayAttendance(user) {
+  const date = new Date().toISOString().slice(0, 10);
+  const { rows } = await pool.query(
+    `SELECT * FROM attendance WHERE user_id = $1 AND date = $2`,
+    [user.id, date]
+  );
+  if (!rows[0]) return null;
+  return {
+    id: rows[0].id,
+    userId: rows[0].user_id,
+    date: rows[0].date,
+    punchIn: rows[0].punch_in,
+    status: rows[0].status
+  };
+}
+
 // ---- router ----------------------------------------------------------------
 async function route(action, payload, token) {
   // public
@@ -382,6 +520,14 @@ async function route(action, payload, token) {
     case 'logout': await pool.query('DELETE FROM sessions WHERE token = $1', [token]); return { ok: true };
     case 'updateMyProfile': return updateMyProfile(user, payload);
     case 'listMySessions': return listMySessions(user);
+    case 'resetMyPassword': return resetMyPassword(user, payload);
+    case 'applyLeave': return applyLeave(user, payload);
+    case 'listMyLeaves': return listMyLeaves(user);
+    case 'listAllLeaves': adminOnly(); return listAllLeaves();
+    case 'updateLeaveStatus': return updateLeaveStatus(user, payload);
+    case 'markLeavesSeen': adminOnly(); return markLeavesSeen();
+    case 'punchIn': return punchIn(user);
+    case 'getTodayAttendance': return getTodayAttendance(user);
 
     case 'listBookings': adminOnly(); return listBookings();
     case 'updateBooking': adminOnly(); return updateBooking(payload);

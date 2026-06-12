@@ -56,6 +56,17 @@ export interface User {
   phone: string;
   profileComplete: boolean;
   createdAt?: string;
+  profileImage?: string;
+  parentName?: string;
+  parentRelation?: string;
+  parentPhone?: string;
+  address?: string;
+  extraPhone?: string;
+  education10th?: string;
+  education12th?: string;
+  educationGrad?: string;
+  isFirstJob?: boolean;
+  pastExperience?: string;
 }
 
 export interface BlockedSlot {
@@ -486,6 +497,70 @@ export async function listMySessions(): Promise<BookingRequest[]> {
   requireRemote();
   return remote<BookingRequest[]>('listMySessions', {});
 }
+
+export interface LeaveRequest {
+  id: string;
+  userId: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
+  seenByAdmin: boolean;
+  employeeName?: string;
+  employeeSpecialty?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  userId: string;
+  date: string;
+  punchIn: string;
+  status: 'present';
+}
+
+export async function resetMyPassword(password: string): Promise<void> {
+  requireRemote();
+  await remote('resetMyPassword', { newPassword: password });
+}
+
+export async function applyLeave(payload: { leaveType: string; startDate: string; endDate: string; reason: string }): Promise<LeaveRequest> {
+  requireRemote();
+  return remote<LeaveRequest>('applyLeave', payload);
+}
+
+export async function listMyLeaves(): Promise<LeaveRequest[]> {
+  requireRemote();
+  return remote<LeaveRequest[]>('listMyLeaves', {});
+}
+
+export async function listAllLeaves(): Promise<LeaveRequest[]> {
+  requireRemote();
+  return remote<LeaveRequest[]>('listAllLeaves', {});
+}
+
+export async function updateLeaveStatus(id: string, status: 'approved' | 'rejected'): Promise<void> {
+  requireRemote();
+  await remote('updateLeaveStatus', { id, status });
+}
+
+export async function markLeavesSeen(): Promise<void> {
+  requireRemote();
+  await remote('markLeavesSeen', {});
+}
+
+export async function punchIn(): Promise<AttendanceRecord> {
+  requireRemote();
+  return remote<AttendanceRecord>('punchIn', {});
+}
+
+export async function getTodayAttendance(): Promise<AttendanceRecord | null> {
+  requireRemote();
+  return remote<AttendanceRecord | null>('getTodayAttendance', {});
+}
+
 
 // Database query tools
 export interface DbQueryResult {
