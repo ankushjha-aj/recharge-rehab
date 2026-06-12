@@ -13,33 +13,18 @@ const navLinks = [
 
 export const Logo: React.FC = () => {
   return (
-    <div className="flex items-center gap-1 select-none" aria-label="Recharge Rehabilitation">
-      {/* Circular R icon — identical to the Chrome tab favicon */}
-      <div
+    <div className="flex items-center gap-0.5 select-none" aria-label="Recharge Rehabilitation">
+      <img
+        src="/images/logo_parts/letter_0_R.png"
+        alt="R"
         style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '50%',
-          background: '#ffffff',
-          border: '2.5px solid #2f6fd0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          boxShadow: '0 1px 4px rgba(47,111,208,0.18)',
+          height: '22px',
+          width: 'auto',
+          objectFit: 'contain',
+          display: 'block',
         }}
-      >
-        <img
-          src="/images/logo_parts/letter_0_R.png"
-          alt="R"
-          style={{
-            width: '22px',
-            height: '22px',
-            objectFit: 'contain',
-            display: 'block',
-          }}
-        />
-      </div>
+        className="logo-word-rehabilitation"
+      />
 
       {/* REHABILITATION word — brand's hand-drawn distorted font */}
       <img
