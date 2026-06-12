@@ -34,10 +34,24 @@ psql "$DATABASE_URL"             # then: SELECT * FROM bookings;
 psql "$DATABASE_URL" -f server/schema.sql   # re-apply schema (idempotent)
 ```
 
-### Change the admin passcode
-It must match in **two** places, then restart/rebuild:
-1. `ADMIN_TOKEN` in `server/.env`  → `pm2 restart recharge-api`
-2. `VITE_ADMIN_PASSCODE` in `.env` → `npm run build` (and restart the static serve)
+### Logins & roles (one shared sign-in at `/admin`)
+Everyone signs in at `/admin` with a **Login ID + password**; the role decides the
+dashboard. Default accounts are auto-created on first boot — **change these passwords
+immediately**:
+
+| Login ID | Password | Role | Can do |
+|----------|----------|------|--------|
+| `superadmin` | `super@recharge2026` | Super Admin | Everything: manage admins + employees, reset any password, delete bookings/accounts |
+| `admin` | `admin@recharge2026` | Admin | Bookings/consultations, availability, payments; create employees, edit employee profiles, reset employee passwords |
+| `e1` … `e10` | `emp@recharge2026` | Employee | Own dashboard only — own profile + sessions assigned to them |
+
+Employees **cannot** change their own login ID/password/role (admin-controlled). The
+booking page's specialist list is the **active employees**.
+
+### Changing passwords
+- In the panel: **Employees** tab → a user → **Reset PW** (admin can reset employees;
+  super admin can reset anyone). Resetting forces that user to sign in again.
+- Passwords are bcrypt-hashed in the `users` table — never stored in plain text.
 
 ### Production access (important)
 The single Node server serves the site **and** `/api` on **port 3000**, so only that

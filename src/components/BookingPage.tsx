@@ -1,26 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { submitBooking, blockedTimesFor, SLOT_TIMES, formatSlot } from '../lib/store';
+import { submitBooking, blockedTimesFor, listSpecialists, SLOT_TIMES, formatSlot, type Staff } from '../lib/store';
 
 interface BookingPageProps {
   onBookConsultation?: () => void;
 }
-
-/*
- * 10 reference employees. Names/roles are placeholders ("Employee 1" … "Employee 10")
- * to be replaced with real staff later. The id is what a booking record stores.
- */
-const specialists: { id: string; name: string; role: string }[] = [
-  { id: 'e1', name: 'Employee 1', role: 'Speech-Language Therapist' },
-  { id: 'e2', name: 'Employee 2', role: 'Speech-Language Therapist' },
-  { id: 'e3', name: 'Employee 3', role: 'Special Educator' },
-  { id: 'e4', name: 'Employee 4', role: 'Special Educator' },
-  { id: 'e5', name: 'Employee 5', role: 'Behavioural Therapist' },
-  { id: 'e6', name: 'Employee 6', role: 'Audiologist / Hearing Specialist' },
-  { id: 'e7', name: 'Employee 7', role: 'Special Educator' },
-  { id: 'e8', name: 'Employee 8', role: 'Speech Therapist' },
-  { id: 'e9', name: 'Employee 9', role: 'Behavioural Therapist' },
-  { id: 'e10', name: 'Employee 10', role: 'Counselor / Parent Trainer' },
-];
 
 const sessionTypes: { id: string; label: string; icon: string }[] = [
   { id: 'consultation', label: 'Initial Consultation', icon: 'stethoscope' },
@@ -64,6 +47,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
   const [mode, setMode] = useState<'online' | 'clinic'>('online');
   const [sessionType, setSessionType] = useState('consultation');
   const [specialist, setSpecialist] = useState('any');
+  const [specialists, setSpecialists] = useState<Staff[]>([]);
   const [date, setDate] = useState('');
   const [slot, setSlot] = useState('');
   const [parentName, setParentName] = useState('');
@@ -76,6 +60,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
 
   React.useEffect(() => {
     document.title = 'Book a Session - Recharge Rehabilitation';
+    listSpecialists().then(setSpecialists).catch(() => setSpecialists([]));
   }, []);
 
   const isSunday = useMemo(() => (date ? new Date(date + 'T00:00:00').getDay() === 0 : false), [date]);

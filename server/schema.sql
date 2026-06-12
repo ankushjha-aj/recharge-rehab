@@ -53,3 +53,33 @@ INSERT INTO staff (id, name, role, active) VALUES
   ('e9',  'Employee 9',  'Behavioural Therapist',            TRUE),
   ('e10', 'Employee 10', 'Counselor / Parent Trainer',       TRUE)
 ON CONFLICT (id) DO NOTHING;
+
+-- "New item" flag for the admin notification badges/popup.
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS seen BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Login accounts for super_admin / admin / employee (one shared login screen).
+-- Employees also carry their profile (filled on the employee dashboard later).
+CREATE TABLE IF NOT EXISTS users (
+  id               TEXT PRIMARY KEY,            -- login id (e.g. 'admin', 'e1')
+  name             TEXT NOT NULL DEFAULT '',
+  password_hash    TEXT NOT NULL,
+  role             TEXT NOT NULL DEFAULT 'employee', -- super_admin | admin | employee
+  active           BOOLEAN NOT NULL DEFAULT TRUE,
+  specialty        TEXT NOT NULL DEFAULT '',    -- employee's therapy role/specialty
+  gender           TEXT NOT NULL DEFAULT '',
+  qualifications   TEXT NOT NULL DEFAULT '',
+  experience       TEXT NOT NULL DEFAULT '',
+  email            TEXT NOT NULL DEFAULT '',
+  phone            TEXT NOT NULL DEFAULT '',
+  profile_complete BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Opaque session tokens handed out at login; sent back as the request `token`.
+CREATE TABLE IF NOT EXISTS sessions (
+  token      TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '30 days'
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);

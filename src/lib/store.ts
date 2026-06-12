@@ -1,30 +1,29 @@
 /*
- * Data layer for Recharge Rehabilitation bookings + admin panel.
+ * Data layer for Recharge Rehabilitation — bookings, auth/roles, and admin.
  *
- * Backend-agnostic by design. Two backends are supported:
- *   1. "local"  — browser localStorage. Used for demo/dev and as a fallback when no
- *                 remote endpoint is configured. (Data lives only in that browser.)
- *   2. "remote" — a Google Apps Script web app (or any compatible JSON endpoint).
- *                 Activated by setting VITE_SHEETS_ENDPOINT. The admin passcode is
- *                 sent as a token and verified server-side, so no secret ships in the
- *                 frontend bundle. See docs/ADMIN_SETUP.md.
+ * Backends:
+ *   - "remote": the Postgres API (VITE_API_ENDPOINT, default "/api"). All auth and
+ *               admin features require this.
+ *   - "local":  localStorage fallback used only for the PUBLIC booking flow when no
+ *               endpoint is configured (so the marketing site/demo still works).
  *
- * Every function is async so swapping local ↔ remote needs no call-site changes.
+ * Protocol: POST { action, token, payload } → { ok, result }.
  */
 
 export type BookingStatus = 'requested' | 'confirmed' | 'cancelled' | 'completed';
 export type PaymentStatus = 'pending' | 'paid_online' | 'pay_on_visit' | 'waived';
 export type BookingSource = 'booking' | 'consultation';
 export type SessionMode = 'online' | 'clinic';
+export type Role = 'super_admin' | 'admin' | 'employee';
 
 export interface BookingRequest {
   id: string;
   source: BookingSource;
   mode: SessionMode;
   sessionType: string;
-  specialistId: string; // 'any' or a Staff id
-  date: string; // preferred date, yyyy-mm-dd ('' if none)
-  slot: string; // preferred time, 'HH:mm' ('' if none)
+  specialistId: string;
+  date: string;
+  slot: string;
   parentName: string;
   childAge: string;
   phone: string;
@@ -32,32 +31,44 @@ export interface BookingRequest {
   notes: string;
   status: BookingStatus;
   payment: PaymentStatus;
-  requestedAt: string; // ISO
-  updatedAt: string; // ISO
+  seen: boolean;
+  requestedAt: string;
+  updatedAt: string;
 }
 
 export interface Staff {
   id: string;
   name: string;
-  role: string;
+  role: string; // specialty label
   active: boolean;
 }
 
+export interface User {
+  id: string;
+  name: string;
+  role: Role;
+  active: boolean;
+  specialty: string;
+  gender: string;
+  qualifications: string;
+  experience: string;
+  email: string;
+  phone: string;
+  profileComplete: boolean;
+  createdAt?: string;
+}
+
 export interface BlockedSlot {
-  id: string; // `${date}|${time}|${staffId}`
-  date: string; // yyyy-mm-dd
-  time: string; // 'HH:mm'
-  staffId: string; // 'any' blocks the time for everyone
+  id: string;
+  date: string;
+  time: string;
+  staffId: string;
   reason: string;
 }
 
-export type NewBooking = Omit<BookingRequest, 'id' | 'status' | 'payment' | 'requestedAt' | 'updatedAt'>;
+export type NewBooking = Omit<BookingRequest, 'id' | 'status' | 'payment' | 'seen' | 'requestedAt' | 'updatedAt'>;
 
-// ---------------------------------------------------------------------------
-// Shared scheduling constants (used by the booking page + admin availability).
-// ---------------------------------------------------------------------------
-
-// Working hours Mon–Sat 10:00 AM – 05:45 PM → 45-min slots.
+// --- scheduling constants ---------------------------------------------------
 export const SLOT_TIMES = ['10:00', '10:45', '11:30', '12:15', '13:00', '13:45', '14:30', '15:15', '16:00', '16:45'];
 
 export const formatSlot = (t: string): string => {
@@ -67,7 +78,7 @@ export const formatSlot = (t: string): string => {
   return `${hr}:${m.toString().padStart(2, '0')} ${period}`;
 };
 
-// The 10 reference employees seeded on first run. Replace with real staff later.
+// Local-only fallback specialist list (used when no backend is configured).
 export const DEFAULT_STAFF: Staff[] = [
   { id: 'e1', name: 'Employee 1', role: 'Speech-Language Therapist', active: true },
   { id: 'e2', name: 'Employee 2', role: 'Speech-Language Therapist', active: true },
@@ -77,75 +88,72 @@ export const DEFAULT_STAFF: Staff[] = [
   { id: 'e6', name: 'Employee 6', role: 'Audiologist / Hearing Specialist', active: true },
   { id: 'e7', name: 'Employee 7', role: 'Special Educator', active: true },
   { id: 'e8', name: 'Employee 8', role: 'Speech Therapist', active: true },
-  { id: 'e9', name: 'Employee 9', role: 'Behavioural Therapist', active: true },
+  { id: 'e9', name: 'Employee 9', role: 'Counselor / Parent Trainer', active: true },
   { id: 'e10', name: 'Employee 10', role: 'Counselor / Parent Trainer', active: true },
 ];
 
-// ---------------------------------------------------------------------------
-// Config — where the remote backend lives + the admin passcode/token.
-// ---------------------------------------------------------------------------
-
+// --- config -----------------------------------------------------------------
 const ENV = import.meta.env as Record<string, string | undefined>;
-// Remote backend endpoint. Prefer the Postgres API (VITE_API_ENDPOINT); the older
-// Google Apps Script var (VITE_SHEETS_ENDPOINT) is kept as a fallback alias. Both
-// speak the same { action, token, payload } protocol, so the rest is identical.
 const REMOTE_ENDPOINT = ENV.VITE_API_ENDPOINT || ENV.VITE_SHEETS_ENDPOINT || '';
-export const ADMIN_PASSCODE = ENV.VITE_ADMIN_PASSCODE || 'recharge2026';
-
 export const isRemote = (): boolean => REMOTE_ENDPOINT.length > 0;
 
-// The admin passcode entered at runtime; doubles as the remote token.
-let sessionToken = '';
-export const setSessionToken = (t: string) => {
-  sessionToken = t;
-};
+// --- session ----------------------------------------------------------------
+const TOKEN_KEY = 'rr_session_token';
+const USER_KEY = 'rr_session_user';
 
-const newId = (): string =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `id-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+let sessionToken = sessionStorage.getItem(TOKEN_KEY) || '';
+let currentUser: User | null = (() => {
+  try {
+    const raw = sessionStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+})();
 
-const now = () => new Date().toISOString();
+export const getToken = (): string => sessionToken;
+export const getCurrentUser = (): User | null => currentUser;
 
-// ---------------------------------------------------------------------------
-// Remote backend (Google Apps Script). text/plain avoids a CORS preflight.
-// ---------------------------------------------------------------------------
+function setSession(token: string, user: User): void {
+  sessionToken = token;
+  currentUser = user;
+  sessionStorage.setItem(TOKEN_KEY, token);
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+function clearSession(): void {
+  sessionToken = '';
+  currentUser = null;
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
+}
+function setCurrentUser(user: User): void {
+  currentUser = user;
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+}
 
-type RemoteAction =
-  | 'createBooking'
-  | 'listBookings'
-  | 'updateBooking'
-  | 'listStaff'
-  | 'saveStaff'
-  | 'removeStaff'
-  | 'listBlocked'
-  | 'addBlocked'
-  | 'removeBlocked';
-
-async function remote<T>(action: RemoteAction, payload: unknown, withToken = true): Promise<T> {
+// --- remote helper ----------------------------------------------------------
+async function remote<T>(action: string, payload: unknown = {}, withToken = true): Promise<T> {
   const res = await fetch(REMOTE_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action, token: withToken ? sessionToken : undefined, payload }),
   });
-  if (!res.ok) throw new Error(`Sheets request failed (${res.status})`);
-  const data = (await res.json()) as { ok: boolean; error?: string; result?: T };
-  if (!data.ok) throw new Error(data.error || 'Sheets request rejected');
+  const data = (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as {
+    ok: boolean;
+    error?: string;
+    result?: T;
+  };
+  if (!data.ok) throw new Error(data.error || 'Request failed');
   return data.result as T;
 }
 
-// ---------------------------------------------------------------------------
-// Local backend (localStorage) — demo/fallback.
-// ---------------------------------------------------------------------------
-
-const KEYS = {
-  bookings: 'rr_bookings',
-  staff: 'rr_staff',
-  blocked: 'rr_blocked',
-  seeded: 'rr_seeded_v1',
+const requireRemote = () => {
+  if (!isRemote()) throw new Error('The admin backend is not configured (set VITE_API_ENDPOINT).');
 };
 
-function read<T>(key: string, fallback: T): T {
+// --- localStorage fallback (public booking demo only) -----------------------
+const LKEYS = { bookings: 'rr_bookings', blocked: 'rr_blocked' };
+function lread<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
@@ -153,137 +161,85 @@ function read<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-function write<T>(key: string, value: T): void {
+function lwrite<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* ignore quota/availability errors */
+    /* ignore */
+  }
+}
+const newId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `id-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const now = () => new Date().toISOString();
+
+// ===========================================================================
+// Auth
+// ===========================================================================
+export async function login(userId: string, password: string): Promise<User> {
+  requireRemote();
+  const { token, user } = await remote<{ token: string; user: User }>('login', { userId, password }, false);
+  setSession(token, user);
+  return user;
+}
+
+export async function logout(): Promise<void> {
+  if (isRemote() && sessionToken) {
+    try {
+      await remote('logout', {});
+    } catch {
+      /* ignore */
+    }
+  }
+  clearSession();
+}
+
+// Re-validate the stored session against the server (call on admin mount).
+export async function refreshMe(): Promise<User | null> {
+  if (!isRemote() || !sessionToken) return null;
+  try {
+    const user = await remote<User>('me', {});
+    setCurrentUser(user);
+    return user;
+  } catch {
+    clearSession();
+    return null;
   }
 }
 
-// Seed staff + a couple of sample requests so the admin panel is demoable offline.
-function ensureSeed(): void {
-  if (read(KEYS.seeded, false)) return;
-  write(KEYS.staff, DEFAULT_STAFF);
-  const sample: BookingRequest[] = [
-    {
-      id: newId(), source: 'booking', mode: 'online', sessionType: 'Speech & Language',
-      specialistId: 'e1', date: '', slot: '', parentName: 'Sample Parent', childAge: '5',
-      phone: '9876500001', concern: 'Speech delay', notes: 'Mornings preferred.',
-      status: 'requested', payment: 'pending', requestedAt: now(), updatedAt: now(),
-    },
-    {
-      id: newId(), source: 'consultation', mode: 'clinic', sessionType: 'Initial Consultation',
-      specialistId: 'any', date: '', slot: '', parentName: 'Sample Guardian', childAge: '7',
-      phone: '9876500002', concern: 'ADHD assessment', notes: '',
-      status: 'requested', payment: 'pending', requestedAt: now(), updatedAt: now(),
-    },
-  ];
-  write(KEYS.bookings, sample);
-  write(KEYS.seeded, true);
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
+// ===========================================================================
+// Public booking flow (works offline via localStorage)
+// ===========================================================================
 export async function submitBooking(input: NewBooking): Promise<BookingRequest> {
   const record: BookingRequest = {
     ...input,
     id: newId(),
     status: 'requested',
     payment: 'pending',
+    seen: false,
     requestedAt: now(),
     updatedAt: now(),
   };
   if (isRemote()) {
-    // Public write — no token needed; the script only appends, never reads here.
-    await remote<unknown>('createBooking', record, false);
+    await remote('createBooking', record, false);
     return record;
   }
-  ensureSeed();
-  const all = read<BookingRequest[]>(KEYS.bookings, []);
-  write(KEYS.bookings, [record, ...all]);
+  lwrite(LKEYS.bookings, [record, ...lread<BookingRequest[]>(LKEYS.bookings, [])]);
   return record;
 }
 
-export async function listBookings(): Promise<BookingRequest[]> {
-  if (isRemote()) return remote<BookingRequest[]>('listBookings', {});
-  ensureSeed();
-  return read<BookingRequest[]>(KEYS.bookings, []);
-}
-
-export async function updateBooking(id: string, patch: Partial<BookingRequest>): Promise<void> {
-  if (isRemote()) {
-    await remote<unknown>('updateBooking', { id, patch: { ...patch, updatedAt: now() } });
-    return;
-  }
-  const all = read<BookingRequest[]>(KEYS.bookings, []);
-  write(
-    KEYS.bookings,
-    all.map((b) => (b.id === id ? { ...b, ...patch, updatedAt: now() } : b)),
-  );
-}
-
-export async function listStaff(): Promise<Staff[]> {
-  if (isRemote()) return remote<Staff[]>('listStaff', {});
-  ensureSeed();
-  return read<Staff[]>(KEYS.staff, DEFAULT_STAFF);
-}
-
-export async function saveStaff(staff: Staff): Promise<Staff> {
-  const record: Staff = { ...staff, id: staff.id || newId() };
-  if (isRemote()) {
-    await remote<unknown>('saveStaff', record);
-    return record;
-  }
-  const all = read<Staff[]>(KEYS.staff, DEFAULT_STAFF);
-  const exists = all.some((s) => s.id === record.id);
-  write(KEYS.staff, exists ? all.map((s) => (s.id === record.id ? record : s)) : [...all, record]);
-  return record;
-}
-
-export async function removeStaff(id: string): Promise<void> {
-  if (isRemote()) {
-    await remote<unknown>('removeStaff', { id });
-    return;
-  }
-  const all = read<Staff[]>(KEYS.staff, DEFAULT_STAFF);
-  write(KEYS.staff, all.filter((s) => s.id !== id));
+export async function listSpecialists(): Promise<Staff[]> {
+  if (isRemote()) return remote<Staff[]>('listSpecialists', {}, false);
+  return DEFAULT_STAFF;
 }
 
 export async function listBlocked(date?: string): Promise<BlockedSlot[]> {
-  let all: BlockedSlot[];
-  if (isRemote()) {
-    // Per-date availability is public (the booking grid shows it); the full list needs the token.
-    all = await remote<BlockedSlot[]>('listBlocked', { date }, !date);
-  } else {
-    all = read<BlockedSlot[]>(KEYS.blocked, []);
-  }
+  if (isRemote()) return remote<BlockedSlot[]>('listBlocked', { date }, !date);
+  const all = lread<BlockedSlot[]>(LKEYS.blocked, []);
   return date ? all.filter((b) => b.date === date) : all;
 }
 
-export async function addBlocked(date: string, time: string, staffId = 'any', reason = ''): Promise<BlockedSlot> {
-  const record: BlockedSlot = { id: `${date}|${time}|${staffId}`, date, time, staffId, reason };
-  if (isRemote()) {
-    await remote<unknown>('addBlocked', record);
-    return record;
-  }
-  const all = read<BlockedSlot[]>(KEYS.blocked, []);
-  if (!all.some((b) => b.id === record.id)) write(KEYS.blocked, [...all, record]);
-  return record;
-}
-
-export async function removeBlocked(id: string): Promise<void> {
-  if (isRemote()) {
-    await remote<unknown>('removeBlocked', { id });
-    return;
-  }
-  const all = read<BlockedSlot[]>(KEYS.blocked, []);
-  write(KEYS.blocked, all.filter((b) => b.id !== id));
-}
-
-// Convenience: the set of blocked 'HH:mm' times for a date (public booking grid).
 export async function blockedTimesFor(date: string): Promise<Set<string>> {
   if (!date) return new Set();
   try {
@@ -292,4 +248,91 @@ export async function blockedTimesFor(date: string): Promise<Set<string>> {
   } catch {
     return new Set();
   }
+}
+
+// ===========================================================================
+// Admin — bookings (remote-only)
+// ===========================================================================
+export async function listBookings(): Promise<BookingRequest[]> {
+  requireRemote();
+  return remote<BookingRequest[]>('listBookings', {});
+}
+export async function updateBooking(id: string, patch: Partial<BookingRequest>): Promise<void> {
+  requireRemote();
+  await remote('updateBooking', { id, patch: { ...patch, updatedAt: now() } });
+}
+export async function deleteBooking(id: string): Promise<void> {
+  requireRemote();
+  await remote('deleteBooking', { id });
+}
+export async function markSeen(id: string): Promise<void> {
+  requireRemote();
+  await remote('markSeen', { id });
+}
+export async function markAllSeen(source?: BookingSource): Promise<void> {
+  requireRemote();
+  await remote('markAllSeen', { source });
+}
+
+// Availability
+export async function addBlocked(date: string, time: string, staffId = 'any', reason = ''): Promise<BlockedSlot> {
+  requireRemote();
+  const record: BlockedSlot = { id: `${date}|${time}|${staffId}`, date, time, staffId, reason };
+  await remote('addBlocked', record);
+  return record;
+}
+export async function removeBlocked(id: string): Promise<void> {
+  requireRemote();
+  await remote('removeBlocked', { id });
+}
+
+// ===========================================================================
+// Admin — users / employees (remote-only)
+// ===========================================================================
+export interface NewUser {
+  id: string;
+  name: string;
+  password: string;
+  role: Role;
+  specialty?: string;
+  gender?: string;
+  qualifications?: string;
+  experience?: string;
+  email?: string;
+  phone?: string;
+}
+
+export async function listUsers(): Promise<User[]> {
+  requireRemote();
+  return remote<User[]>('listUsers', {});
+}
+export async function createUser(input: NewUser): Promise<User> {
+  requireRemote();
+  return remote<User>('createUser', input);
+}
+export async function updateUser(id: string, patch: Partial<User>): Promise<User> {
+  requireRemote();
+  return remote<User>('updateUser', { id, patch });
+}
+export async function resetPassword(id: string, password: string): Promise<void> {
+  requireRemote();
+  await remote('resetPassword', { id, password });
+}
+export async function deleteUser(id: string): Promise<void> {
+  requireRemote();
+  await remote('deleteUser', { id });
+}
+
+// ===========================================================================
+// Employee self-service (remote-only)
+// ===========================================================================
+export async function updateMyProfile(patch: Partial<User>): Promise<User> {
+  requireRemote();
+  const user = await remote<User>('updateMyProfile', patch);
+  setCurrentUser(user);
+  return user;
+}
+export async function listMySessions(): Promise<BookingRequest[]> {
+  requireRemote();
+  return remote<BookingRequest[]>('listMySessions', {});
 }
