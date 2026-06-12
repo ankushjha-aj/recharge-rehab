@@ -38,7 +38,6 @@ export const Logo: React.FC = () => {
             objectFit: 'contain',
             display: 'block',
           }}
-          className="logo-word-rehabilitation"
         />
       </div>
 
