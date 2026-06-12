@@ -114,6 +114,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [remember, setRemember] = useState(() => localStorage.getItem('rr_remember') === '1');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -122,6 +123,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
     setBusy(true);
     setErr('');
     try {
+      localStorage.setItem('rr_remember', remember ? '1' : '0');
       onLoggedIn(await login(id.trim(), pw));
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : 'Login failed');
@@ -134,88 +136,144 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
     'w-full bg-surface-container-lowest/60 border border-outline-variant rounded-2xl py-3.5 pl-11 pr-4 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200';
 
   return (
-    <div className="relative flex-grow min-h-screen overflow-hidden bg-gradient-to-b from-primary-fixed to-background flex items-center justify-center px-6 py-16">
-      {/* Dimmed, non-interactive hero animation as the backdrop */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none opacity-[0.4]" aria-hidden="true">
-        <HeroBanner mode="backdrop" />
-      </div>
-      {/* Scrim pushes the scene back so the card stays the focus */}
-      <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/15 to-background/60 pointer-events-none" />
-      {/* Soft corner glows (same as the site hero) */}
-      <div className="absolute -right-16 -top-12 w-72 h-72 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
-      <div className="absolute -left-20 bottom-8 w-72 h-72 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+    <div className="relative flex-grow min-h-screen overflow-hidden bg-gradient-to-br from-primary-fixed via-background to-background">
+      {/* Subtle ambient glows — no hard edges */}
+      <div className="absolute -left-24 top-1/4 w-[32rem] h-[32rem] rounded-full bg-primary/[0.07] blur-[100px] pointer-events-none" />
+      <div className="absolute right-0 -bottom-20 w-[28rem] h-[28rem] rounded-full bg-primary/[0.05] blur-[90px] pointer-events-none" />
 
-      {/* Sign-in card */}
-      <div className="relative z-10 w-full max-w-lg animate-scale-bounce-in">
-        <form
-          onSubmit={submit}
-          className="bg-surface-container-lowest/80 backdrop-blur-xl border border-outline-variant/70 rounded-[2rem] p-8 md:p-11 shadow-2xl text-center"
-        >
-          {/* Brand mark with a soft glow ring */}
-          <div className="relative w-16 h-16 mx-auto mb-5">
-            <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
-            <div className="relative w-16 h-16 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
-              <span className="material-symbols-outlined text-[32px]" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
-            </div>
-          </div>
-          <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs">Recharge Rehabilitation</p>
-          <h1 className="text-headline-md font-extrabold text-on-surface mb-1.5">Staff Sign In</h1>
-          <p className="text-body-sm text-on-surface-variant mb-7">Admins and employees sign in to manage bookings and availability.</p>
+      {/* ——— Two-panel grid: animation (left) + form (right) ——— */}
+      <div className="relative z-10 min-h-screen grid grid-cols-1 md:grid-cols-2 items-stretch">
 
-          <div className="space-y-3 text-left">
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">person</span>
-              <input
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                placeholder="Login ID"
-                autoFocus
-                autoCapitalize="none"
-                autoComplete="username"
-                className={fieldCls}
-              />
-            </div>
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">lock</span>
-              <input
-                type={showPw ? 'text' : 'password'}
-                value={pw}
-                onChange={(e) => setPw(e.target.value)}
-                placeholder="Password"
-                autoComplete="current-password"
-                className={`${fieldCls} pr-11`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPw((s) => !s)}
-                title={showPw ? 'Hide password' : 'Show password'}
-                className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 grid place-items-center rounded-full text-on-surface-variant hover:text-primary transition-colors"
-              >
-                <span className="material-symbols-outlined text-[20px]">{showPw ? 'visibility_off' : 'visibility'}</span>
-              </button>
-            </div>
+        {/* ─── Left: animated house scene ─── */}
+        <div className="relative flex items-center justify-center overflow-hidden md:min-h-screen">
+          {/* Gradient edge that fades the scene rightward into the form panel — NO hard line */}
+          <div className="hidden md:block absolute inset-y-0 right-0 w-32 bg-gradient-to-r from-transparent to-background z-10 pointer-events-none" />
+          {/* Slight top-fade on mobile where the two halves stack */}
+          <div className="md:hidden absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent z-10 pointer-events-none" />
+
+          <div className="w-full h-full min-h-[320px] md:min-h-0 flex items-center justify-center opacity-[0.55] md:opacity-[0.65] select-none pointer-events-none">
+            <HeroBanner mode="backdrop" />
           </div>
 
-          {err && (
-            <p className="flex items-center justify-center gap-1.5 text-body-sm text-[#B42318] mt-4">
-              <span className="material-symbols-outlined text-[18px]">error</span>
-              {err}
+          {/* Tagline overlaid on the scene — bottom-left on desktop, bottom-center on mobile */}
+          <div className="absolute bottom-8 left-0 right-0 md:left-8 md:right-auto z-20 text-center md:text-left px-6 md:px-0 animate-fade-in" style={{ animationDelay: '1.2s', animationFillMode: 'both' }}>
+            <p className="text-headline-sm md:text-headline-md font-extrabold text-on-surface leading-snug max-w-xs">
+              Discharged from the hospital&nbsp;—
             </p>
-          )}
+            <p className="text-headline-sm md:text-headline-md font-extrabold text-primary leading-snug max-w-xs">
+              recharge with us.
+            </p>
+          </div>
+        </div>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-6 w-full bg-primary text-on-primary py-3.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {busy ? 'Signing in…' : (<>Sign In <span className="material-symbols-outlined text-[18px]">arrow_forward</span></>)}
-          </button>
-        </form>
+        {/* ─── Right: sign-in form ─── */}
+        <div className="relative flex items-center justify-center px-6 py-12 md:py-0">
+          {/* Very subtle scrim so the form panel is distinguishable yet blended */}
+          <div className="absolute inset-0 bg-background/70 backdrop-blur-sm md:backdrop-blur-none pointer-events-none" />
 
-        <p className="text-center text-[11px] text-on-surface-variant/70 mt-4 flex items-center justify-center gap-1.5">
-          <span className="material-symbols-outlined text-[14px]">shield</span>
-          Protected staff area · Recharge Rehabilitation
-        </p>
+          <div className="relative z-10 w-full max-w-md animate-fade-in-up" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
+            {/* Brand mark with glow ring */}
+            <div className="relative w-14 h-14 mb-6">
+              <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
+              <div className="relative w-14 h-14 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
+                <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
+              </div>
+            </div>
+
+            <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs">Recharge Rehabilitation</p>
+            <h1 className="text-headline-lg font-extrabold text-on-surface mb-1.5">Welcome back</h1>
+            <p className="text-body-md text-on-surface-variant mb-8">Sign in to manage bookings, availability and your team.</p>
+
+            <form onSubmit={submit} className="space-y-4">
+              {/* Login ID */}
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">person</span>
+                <input
+                  value={id}
+                  onChange={(e) => setId(e.target.value)}
+                  placeholder="Login ID"
+                  autoFocus
+                  autoCapitalize="none"
+                  autoComplete="username"
+                  className={fieldCls}
+                />
+              </div>
+
+              {/* Password */}
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">lock</span>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={pw}
+                  onChange={(e) => setPw(e.target.value)}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  className={`${fieldCls} pr-11`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((s) => !s)}
+                  title={showPw ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 grid place-items-center rounded-full text-on-surface-variant hover:text-primary transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[20px]">{showPw ? 'visibility_off' : 'visibility'}</span>
+                </button>
+              </div>
+
+              {/* Keep me signed in */}
+              <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                <span
+                  onClick={() => setRemember((r) => !r)}
+                  className={`inline-flex items-center justify-center w-5 h-5 rounded-md border-2 transition-all duration-200 ${
+                    remember
+                      ? 'bg-primary border-primary text-on-primary'
+                      : 'border-outline-variant text-transparent group-hover:border-primary/60'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">check</span>
+                </span>
+                <span className="text-body-sm text-on-surface-variant">Keep me signed in on this device</span>
+              </label>
+
+              {err && (
+                <p className="flex items-center gap-1.5 text-body-sm text-[#B42318]">
+                  <span className="material-symbols-outlined text-[18px]">error</span>
+                  {err}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full bg-primary text-on-primary py-3.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-[0.98] transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {busy ? 'Signing in…' : (<>Sign In <span className="material-symbols-outlined text-[18px]">arrow_forward</span></>)}
+              </button>
+            </form>
+
+            {/* Footer: trouble link */}
+            <div className="mt-8 pt-6 border-t border-outline-variant/40">
+              <p className="text-center text-body-sm text-on-surface-variant/70 flex items-center justify-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">help_outline</span>
+                Trouble signing in?{' '}
+                <a
+                  href="https://wa.me/919876543210?text=Hi%2C%20I%20need%20help%20with%20my%20Recharge%20staff%20login."
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary font-bold hover:underline"
+                >
+                  Contact the super admin
+                </a>
+              </p>
+            </div>
+
+            <p className="text-center text-[11px] text-on-surface-variant/50 mt-4 flex items-center justify-center gap-1.5">
+              <span className="material-symbols-outlined text-[14px]">shield</span>
+              Protected staff area · Recharge Rehabilitation
+            </p>
+          </div>
+        </div>
+
       </div>
     </div>
   );

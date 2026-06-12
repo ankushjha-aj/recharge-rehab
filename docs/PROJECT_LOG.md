@@ -102,6 +102,26 @@ times are hidden once the admin uploads the morning schedule.*
 
 ---
 
+## Admin login redesign — 21st → 22nd
+
+### 21st commit — Glassy card + house backdrop
+- **`HeroBanner`** gained a `mode="backdrop"` that renders only the animated house scene
+  (no brand letters / text / buttons) for reuse as a dimmed background.
+- **`/admin` login** rewrote: site gradient + soft glows, the house animation dimmed to
+  ~40 % behind a larger frosted-glass card (`max-w-lg`, bounce-in), brand ⚡ mark with a
+  glow ring, icon-led fields, show/hide-password toggle, primary "Sign In →" button.
+  Login logic unchanged.
+
+### 22nd commit — Blended two-panel layout
+- Replaced the centred card with a **seamless left/right layout**: the animated house
+  scene fills the left half (no hard divider), and the right side is the sign-in form.
+- Tagline: *"Discharged from the hospital — recharge with us."*
+- Added a **"Keep me signed in"** checkbox and a **"Trouble signing in? Contact the super
+  admin"** link at the bottom of the form panel.
+- On mobile the two halves stack vertically (animation on top, form below).
+
+---
+
 ## Current architecture
 ```
 Browser ──HTTP:3000──> Node/Express (server/) ──> PostgreSQL (recharge_rehab)
