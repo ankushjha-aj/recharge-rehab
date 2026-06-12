@@ -57,8 +57,8 @@ html {
 
 /* Logo word image: black-on-white, so invert to white-on-dark in dark mode */
 .logo-word-rehabilitation {
-  /* Light mode: show as-is (black letters on transparent/white) */
-  filter: none;
+  /* Light mode: convert black image to brand blue (#075fab) */
+  filter: invert(25%) sepia(86%) saturate(2059%) hue-rotate(196deg) brightness(91%) contrast(98%);
   transition: filter 0.3s ease;
 }
 .dark .logo-word-rehabilitation {
