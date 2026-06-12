@@ -464,11 +464,11 @@ textarea:focus {
 }
 
 .animate-viewport-fly-ltr {
-  animation: flyViewportLTR var(--fly-dur, 12s) linear infinite;
+  animation: flyViewportLTR var(--fly-dur, 12s) linear infinite both;
 }
 
 .animate-viewport-fly-rtl {
-  animation: flyViewportRTL var(--fly-dur, 12s) linear infinite;
+  animation: flyViewportRTL var(--fly-dur, 12s) linear infinite both;
 }
 
 

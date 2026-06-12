@@ -197,18 +197,18 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
     <div className="relative flex-grow min-h-screen overflow-hidden bg-background" style={bgStyle}>
       {/* Background Flying Birds (All over the screen, z-0) */}
       <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden z-0">
-        <FlyingBird direction="ltr" top="10%" color="#3B82F6" duration="15s" delay="0s" scale={0.6} />
-        <FlyingBird direction="rtl" top="18%" color="#EF4444" duration="12s" delay="2s" scale={0.7} flapDelay="0.1s" />
-        <FlyingBird direction="ltr" top="28%" color="#10B981" duration="18s" delay="5s" scale={0.5} flapDelay="0.2s" />
-        <FlyingBird direction="rtl" top="36%" color="#8B5CF6" duration="14s" delay="1s" scale={0.8} />
-        <FlyingBird direction="ltr" top="45%" color="#F59E0B" duration="13s" delay="6s" scale={0.65} flapDelay="0.15s" />
-        <FlyingBird direction="rtl" top="54%" color="#0EA5E9" duration="16s" delay="3s" scale={0.75} />
-        <FlyingBird direction="ltr" top="65%" color="#EC4899" duration="14s" delay="7s" scale={0.55} flapDelay="0.05s" />
-        <FlyingBird direction="rtl" top="73%" color="#84CC16" duration="19s" delay="4s" scale={0.6} />
-        <FlyingBird direction="ltr" top="82%" color="#14B8A6" duration="11s" delay="2.5s" scale={0.7} flapDelay="0.1s" />
-        <FlyingBird direction="rtl" top="90%" color="#F43F5E" duration="17s" delay="5.5s" scale={0.5} flapDelay="0.25s" />
-        <FlyingBird direction="ltr" top="22%" color="#3B82F6" duration="20s" delay="8s" scale={0.65} />
-        <FlyingBird direction="rtl" top="62%" color="#EF4444" duration="15s" delay="10s" scale={0.7} />
+        <FlyingBird direction="ltr" top="10%" color="#3B82F6" duration="15s" delay="3s" scale={0.8} />
+        <FlyingBird direction="rtl" top="18%" color="#EF4444" duration="12s" delay="5s" scale={0.95} flapDelay="0.1s" />
+        <FlyingBird direction="ltr" top="28%" color="#10B981" duration="18s" delay="8s" scale={0.7} flapDelay="0.2s" />
+        <FlyingBird direction="rtl" top="36%" color="#8B5CF6" duration="14s" delay="4s" scale={1.1} />
+        <FlyingBird direction="ltr" top="45%" color="#F59E0B" duration="13s" delay="9s" scale={0.85} flapDelay="0.15s" />
+        <FlyingBird direction="rtl" top="54%" color="#0EA5E9" duration="16s" delay="6s" scale={1.0} />
+        <FlyingBird direction="ltr" top="65%" color="#EC4899" duration="14s" delay="10s" scale={0.75} flapDelay="0.05s" />
+        <FlyingBird direction="rtl" top="73%" color="#84CC16" duration="19s" delay="7s" scale={0.8} />
+        <FlyingBird direction="ltr" top="82%" color="#14B8A6" duration="11s" delay="5.5s" scale={0.95} flapDelay="0.1s" />
+        <FlyingBird direction="rtl" top="90%" color="#F43F5E" duration="17s" delay="8.5s" scale={0.7} flapDelay="0.25s" />
+        <FlyingBird direction="ltr" top="22%" color="#3B82F6" duration="20s" delay="11s" scale={0.85} />
+        <FlyingBird direction="rtl" top="62%" color="#EF4444" duration="15s" delay="13s" scale={0.95} />
       </div>
 
       {/* Floating Top-Right Controls: Theme Toggle & Social Links */}
@@ -271,7 +271,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
           </div>
 
           {/* Center: Animated House Scene background */}
-          <div className="w-full flex-grow flex items-center justify-center select-none pointer-events-none z-10">
+          <div className="w-full flex-grow flex items-center justify-center select-none z-10">
             <HeroBanner mode="backdrop" />
           </div>
 
