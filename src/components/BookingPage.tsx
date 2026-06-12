@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { submitBooking, blockedTimesFor, SLOT_TIMES, formatSlot } from '../lib/store';
 
 interface BookingPageProps {
   onBookConsultation?: () => void;
@@ -30,20 +31,10 @@ const sessionTypes: { id: string; label: string; icon: string }[] = [
   { id: 'follow-up', label: 'Follow-up Session', icon: 'event_repeat' },
 ];
 
-// Working hours Mon–Sat 10:00 AM – 05:45 PM → 45-min slots.
-const SLOT_TIMES = ['10:00', '10:45', '11:30', '12:15', '13:00', '13:45', '14:30', '15:15', '16:00', '16:45'];
-
-const formatSlot = (t: string) => {
-  const [h, m] = t.split(':').map(Number);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr}:${m.toString().padStart(2, '0')} ${period}`;
-};
-
 /*
  * Deterministic pseudo-occupancy: each date shows a believable, stable set of
- * already-taken slots so parents see that some times are unavailable. Real
- * availability will be served from the admin database once it's wired up.
+ * already-taken slots so parents see that some times are unavailable. This is a
+ * visual baseline; admin-blocked times (from the store) are layered on top.
  */
 const isSlotOccupied = (dateStr: string, time: string) => {
   const s = dateStr + '|' + time;
@@ -80,6 +71,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
   const [phone, setPhone] = useState('');
   const [concern, setConcern] = useState('');
   const [notes, setNotes] = useState('');
+  const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
 
   React.useEffect(() => {
@@ -88,58 +80,77 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
 
   const isSunday = useMemo(() => (date ? new Date(date + 'T00:00:00').getDay() === 0 : false), [date]);
 
+  // Load admin-blocked times for the chosen date (real availability once the
+  // Google Sheets backend is configured; empty otherwise).
+  React.useEffect(() => {
+    if (!date) {
+      setBlocked(new Set());
+      return;
+    }
+    let active = true;
+    blockedTimesFor(date).then((s) => {
+      if (active) setBlocked(s);
+    });
+    return () => {
+      active = false;
+    };
+  }, [date]);
+
+  const slotTaken = (t: string) => isSlotOccupied(date, t) || blocked.has(t);
+
   // Reset slot if the date changes and the previously-picked slot is gone/occupied.
   React.useEffect(() => {
-    if (slot && (isSunday || isSlotOccupied(date, slot))) setSlot('');
-  }, [date, slot, isSunday]);
+    if (slot && (isSunday || slotTaken(slot))) setSlot('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, slot, isSunday, blocked]);
 
   const canSubmit =
     !!parentName.trim() && !!phone.trim() && !!childAge.trim() && !!date && !!slot && !isSunday;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
 
-    const specialistLabel =
-      specialist === 'any'
-        ? 'No preference'
-        : specialists.find((s) => s.id === specialist)?.name +
-          ' (' + specialists.find((s) => s.id === specialist)?.role + ')';
     const sessionLabel = sessionTypes.find((s) => s.id === sessionType)?.label ?? sessionType;
+    const specialistMeta = specialists.find((s) => s.id === specialist);
+    const specialistLabel =
+      specialist === 'any' ? 'No preference' : `${specialistMeta?.name} (${specialistMeta?.role})`;
 
-    // Structured booking request — this is the exact shape the admin database will
-    // store once the backend is wired up (see handoff notes).
-    const booking = {
-      mode,
-      sessionType: sessionLabel,
-      specialist: specialistLabel,
-      date,
-      slot: formatSlot(slot),
-      parentName: parentName.trim(),
-      childAge: childAge.trim(),
-      phone: phone.trim(),
-      concern: concern.trim(),
-      notes: notes.trim(),
-      requestedAt: new Date().toISOString(),
-      status: 'requested',
-    };
+    // Save into the admin store (Google Sheets when configured, else local demo).
+    // The submit succeeds for the parent even if persistence hiccups — the
+    // WhatsApp hand-off remains the guaranteed path.
+    try {
+      await submitBooking({
+        source: 'booking',
+        mode,
+        sessionType: sessionLabel,
+        specialistId: specialist,
+        date,
+        slot, // stored raw 'HH:mm'
+        parentName: parentName.trim(),
+        childAge: childAge.trim(),
+        phone: phone.trim(),
+        concern: concern.trim(),
+        notes: notes.trim(),
+      });
+    } catch {
+      /* non-blocking — WhatsApp hand-off still happens below */
+    }
 
     const message =
       `Hello Recharge Rehabilitation,\n\nI'd like to *request a session*. Details:\n\n` +
-      `🧩 *Type:* ${booking.sessionType}\n` +
-      `💻 *Mode:* ${booking.mode === 'online' ? 'Online (Video)' : 'In-Clinic'}\n` +
-      `👩‍⚕️ *Preferred Specialist:* ${booking.specialist}\n` +
-      `📅 *Preferred Date:* ${booking.date}\n` +
-      `⏰ *Preferred Time:* ${booking.slot}\n\n` +
-      `👤 *Parent Name:* ${booking.parentName}\n` +
-      `👶 *Child's Age:* ${booking.childAge} years\n` +
-      `📞 *Phone:* ${booking.phone}\n` +
-      `🩺 *Concern:* ${booking.concern || '—'}\n` +
-      `💬 *Notes:* ${booking.notes || '—'}\n\n` +
+      `🧩 *Type:* ${sessionLabel}\n` +
+      `💻 *Mode:* ${mode === 'online' ? 'Online (Video)' : 'In-Clinic'}\n` +
+      `👩‍⚕️ *Preferred Specialist:* ${specialistLabel}\n` +
+      `📅 *Preferred Date:* ${date}\n` +
+      `⏰ *Preferred Time:* ${formatSlot(slot)}\n\n` +
+      `👤 *Parent Name:* ${parentName.trim()}\n` +
+      `👶 *Child's Age:* ${childAge.trim()} years\n` +
+      `📞 *Phone:* ${phone.trim()}\n` +
+      `🩺 *Concern:* ${concern.trim() || '—'}\n` +
+      `💬 *Notes:* ${notes.trim() || '—'}\n\n` +
       `Please confirm availability. Thank you!`;
 
-    // TODO(backend): POST `booking` to the admin API here so it lands in the
-    // admin panel/database. For now we hand off via WhatsApp (out-of-band confirm).
     window.open(`https://wa.me/919910525100?text=${encodeURIComponent(message)}`, '_blank');
     setSubmitted(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -307,7 +318,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
                   <>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
                       {SLOT_TIMES.map((t) => {
-                        const occupied = isSlotOccupied(date, t);
+                        const occupied = slotTaken(t);
                         const selected = slot === t;
                         return (
                           <button

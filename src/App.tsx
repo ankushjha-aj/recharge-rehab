@@ -9,10 +9,12 @@ import ContactPage from './components/ContactPage';
 import GalleryPage from './components/GalleryPage';
 import ServicesPage from './components/ServicesPage';
 import BookingPage from './components/BookingPage';
+import AdminPage from './components/AdminPage';
 
 // Path routes start with "/" so in-page anchors (e.g. "#approach") are ignored.
 const getRoute = () => {
   const path = window.location.pathname;
+  if (path.startsWith('/admin')) return '/admin';
   if (path.startsWith('/about')) return '/about';
   if (path.startsWith('/contact')) return '/contact';
   if (path.startsWith('/gallery')) return '/gallery';
@@ -65,6 +67,14 @@ function App() {
     setIsWIPOpen(true);
   };
 
+  // Admin is a standalone, passcode-gated screen — no public navbar/footer/FAB.
+  if (route === '/admin') {
+    return (
+      <div className="bg-background text-on-surface flex flex-col min-h-screen">
+        <AdminPage />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-background text-on-surface flex flex-col min-h-screen">

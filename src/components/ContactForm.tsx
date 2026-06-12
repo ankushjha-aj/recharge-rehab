@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { submitBooking } from '../lib/store';
 
 interface ContactFormProps {
   isModal?: boolean;
@@ -35,6 +36,23 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
     };
     
     const serviceName = serviceLabels[formData.service] || formData.service || 'General Inquiry';
+
+    // Save into the admin store as a consultation request (non-blocking).
+    submitBooking({
+      source: 'consultation',
+      mode: 'clinic',
+      sessionType: serviceName,
+      specialistId: 'any',
+      date: '',
+      slot: '',
+      parentName: formData.parentName,
+      childAge: formData.childAge,
+      phone: formData.phone,
+      concern: serviceName,
+      notes: formData.message,
+    }).catch(() => {
+      /* non-blocking — WhatsApp hand-off still happens below */
+    });
 
     const messageText = `Hello Recharge Rehabilitation,\n\nI would like to book an appointment. Here are my details:\n\n👤 *Parent Name:* ${formData.parentName}\n👶 *Child's Age:* ${formData.childAge} years\n📞 *Phone Number:* ${formData.phone}\n🏥 *Service Interested:* ${serviceName}\n💬 *Message:* ${formData.message || 'No additional message'}`;
 
