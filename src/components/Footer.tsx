@@ -7,7 +7,7 @@ const Footer: React.FC = () => {
       {/* Spacer to guarantee visual spacing between footer and the above section */}
       <div className="h-6 md:h-10 w-full flex-shrink-0" />
 
-      <footer className="bg-gradient-to-b from-background via-[#aecaf2]/60 to-[#7ea8ee] dark:from-background dark:via-[#13243a]/85 dark:to-[#0f1d30] text-body-sm w-full pb-8 pt-4 px-6 md:px-12 mt-auto">
+      <footer className="bg-gradient-to-b from-background via-background via-50% to-[#7ea8ee]/50 dark:from-background dark:via-background dark:via-50% to-[#0f1d30]/80 text-body-sm w-full pb-8 pt-4 px-6 md:px-12 mt-auto">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 w-full">
 
           {/* Column 1: Brand info and Socials */}

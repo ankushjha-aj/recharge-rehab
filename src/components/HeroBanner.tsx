@@ -559,7 +559,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
                   {/* Moon — CSS class `:root:not(.dark) .animate-moon-cycle` hides it in light mode */}
                   <g id="celestial-moon" className="animate-moon-cycle">
                     <circle cx="70" cy="180" r="24" fill="#38BDF8" opacity="0.2" />
-                    <circle cx="70" cy="180" r="16" fill="#F8FAFC" mask="url(#moon-mask)" />
+                    <circle cx="70" cy="180" r="16" fill="#FFFFFF" mask="url(#moon-mask)" />
                   </g>
                 </g>
 

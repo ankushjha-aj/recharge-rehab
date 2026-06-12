@@ -141,29 +141,29 @@ const Window3D: React.FC<Window3DProps> = ({ cx, cy, w, h, material }) => (
     {/* Frame borders - Slate 50 off-white */}
     <mesh position={[0, h / 2 + 2, 1.2]} castShadow>
       <boxGeometry args={[w + 8, 4, 4]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
     <mesh position={[0, -(h / 2 + 2), 1.2]} castShadow>
       <boxGeometry args={[w + 8, 4, 4]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
     <mesh position={[-(w / 2 + 2), 0, 1.2]}>
       <boxGeometry args={[4, h + 8, 4]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
     <mesh position={[w / 2 + 2, 0, 1.2]}>
       <boxGeometry args={[4, h + 8, 4]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
     {/* Centre mullion */}
     <mesh position={[0, 0, 2]}>
       <boxGeometry args={[1.6, h - 3, 1.4]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
     {/* Sill - Slate 50 off-white */}
     <mesh position={[0, -(h / 2 + 4.5), 2.5]} castShadow>
       <boxGeometry args={[w + 12, 3.5, 9]} />
-      <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+      <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
     </mesh>
   </group>
 );
@@ -200,7 +200,7 @@ const ToyBus3D: React.FC<{
     {/* Roof/Top white accent */}
     <mesh position={[0, 3.6, 0]}>
       <boxGeometry args={[14, 0.4, 6]} />
-      <meshStandardMaterial color="#F8FAFC" />
+      <meshStandardMaterial color="#FFFFFF" />
     </mesh>
     {/* Wheels */}
     <mesh position={[-4, -3.5, 3]} rotation={[Math.PI / 2, 0, 0]} castShadow>
@@ -828,7 +828,7 @@ const HouseModel: React.FC<{
 
       {/* Sloped Slate 50 roof */}
       <mesh geometry={roofGeo} position={[0, 101, 2]} castShadow receiveShadow>
-        <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} flatShading />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} flatShading />
       </mesh>
 
       {/* Chimney + cap */}
@@ -848,25 +848,25 @@ const HouseModel: React.FC<{
       {/* Balcony: floor slab, handrail, 32 balusters, end returns */}
       <mesh position={p(500, 156, 9)} castShadow>
         <boxGeometry args={[520, 12, 18]} />
-        <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
       </mesh>
       <mesh position={p(500, 114, 14)} castShadow>
         <boxGeometry args={[520, 8, 8]} />
-        <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
       </mesh>
       {Array.from({ length: 32 }).map((_, i) => (
         <mesh key={i} position={p(247.5 + i * 16, 134, 14)}>
           <boxGeometry args={[5, 32, 5]} />
-          <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
         </mesh>
       ))}
       <mesh position={p(244, 114, 7)}>
         <boxGeometry args={[8, 8, 14]} />
-        <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
       </mesh>
       <mesh position={p(756, 114, 7)}>
         <boxGeometry args={[8, 8, 14]} />
-        <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
       </mesh>
 
       {/* Second floor windows */}
@@ -877,12 +877,12 @@ const HouseModel: React.FC<{
       {/* Arched window (right top) - Slate 50 borders */}
       <group position={[55, 73, 120]}>
         <mesh geometry={archFrameGeo} castShadow>
-          <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
         </mesh>
         <mesh geometry={archGlassGeo} position={[0, 0, 1.2]} material={ufMaterial} />
         <mesh position={[0, -1, 3.4]}>
           <boxGeometry args={[1.6, 44, 1.2]} />
-          <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.7} emissive="#FFFFFF" emissiveIntensity={0.15} />
         </mesh>
       </group>
 
@@ -893,7 +893,7 @@ const HouseModel: React.FC<{
       {/* Main entrance: Slate 50 surround, warm-lit interior, sliding door */}
       <group position={[85, -29, 120]}>
         <mesh geometry={surroundGeo}>
-          <meshStandardMaterial color="#F8FAFC" roughness={0.8} emissive="#F8FAFC" emissiveIntensity={0.15} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.8} emissive="#FFFFFF" emissiveIntensity={0.15} />
         </mesh>
         <mesh geometry={interiorGeo} position={[0, 0, 0.6]}>
           <meshStandardMaterial color="#FFEAA7" emissive="#FFD980" emissiveIntensity={0.25} roughness={0.9} />
