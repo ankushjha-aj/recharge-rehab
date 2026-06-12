@@ -57,10 +57,11 @@ html {
 
 /* Logo word image: black-on-white, so invert to white-on-dark in dark mode */
 .logo-word-rehabilitation {
-  /* Light mode: convert black image to brand blue (#075fab) */
-  filter: invert(25%) sepia(86%) saturate(2059%) hue-rotate(196deg) brightness(91%) contrast(98%);
+  /* Light mode: show as-is (black letters on transparent/white) */
+  filter: none;
   transition: filter 0.3s ease;
 }
+
 .dark .logo-word-rehabilitation {
   /* Dark mode: invert to white letters */
   filter: invert(1) brightness(1.1);
@@ -449,6 +450,7 @@ textarea:focus {
   0% {
     transform: translate(-10vw, 0);
   }
+
   100% {
     transform: translate(110vw, 0);
   }
@@ -458,6 +460,7 @@ textarea:focus {
   0% {
     transform: translate(110vw, 0) scaleX(-1);
   }
+
   100% {
     transform: translate(-10vw, 0) scaleX(-1);
   }
@@ -952,8 +955,15 @@ textarea:focus {
 
 /* Rain and Cloud Animations */
 @keyframes cloudsEnter {
-  0% { opacity: 0; transform: translateY(-30px); }
-  100% { opacity: 0.95; transform: translateY(0); }
+  0% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+
+  100% {
+    opacity: 0.95;
+    transform: translateY(0);
+  }
 }
 
 .animate-clouds-enter {
@@ -961,8 +971,15 @@ textarea:focus {
 }
 
 @keyframes cloudsExit {
-  0% { opacity: 0.95; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-30px); }
+  0% {
+    opacity: 0.95;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
 }
 
 .animate-clouds-exit {
@@ -970,10 +987,23 @@ textarea:focus {
 }
 
 @keyframes rainFall {
-  0% { transform: translateY(-40px) translateX(20px); opacity: 0; }
-  10% { opacity: 0.8; }
-  90% { opacity: 0.8; }
-  100% { transform: translateY(320px) translateX(-160px); opacity: 0; }
+  0% {
+    transform: translateY(-40px) translateX(20px);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 0.8;
+  }
+
+  90% {
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translateY(320px) translateX(-160px);
+    opacity: 0;
+  }
 }
 
 .animate-rain-drop {
@@ -982,55 +1012,121 @@ textarea:focus {
 
 /* Play Exit/Enter door keyframes */
 @keyframes childExitDoor {
-  0% { transform: translate(475px, 290px) scale(0.65); opacity: 0; }
-  10% { opacity: 1; }
-  100% { transform: translate(110px, 290px) scale(1); opacity: 1; }
+  0% {
+    transform: translate(475px, 290px) scale(0.65);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(110px, 290px) scale(1);
+    opacity: 1;
+  }
 }
+
 .animate-child-exit {
   animation: childExitDoor 3s ease-out forwards;
 }
 
 @keyframes childEnterRain {
-  0% { transform: translate(110px, 290px) scale(1); opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translate(475px, 290px) scale(0.65); opacity: 0; }
+  0% {
+    transform: translate(110px, 290px) scale(1);
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(475px, 290px) scale(0.65);
+    opacity: 0;
+  }
 }
+
 .animate-child-enter-rain {
   animation: childEnterRain 2s ease-in forwards;
 }
 
 @keyframes dog1ExitDoor {
-  0% { transform: translate(445px, 290px) scale(0.65); opacity: 0; }
-  10% { opacity: 1; }
-  100% { transform: translate(140px, 290px) scale(1); opacity: 1; }
+  0% {
+    transform: translate(445px, 290px) scale(0.65);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(140px, 290px) scale(1);
+    opacity: 1;
+  }
 }
+
 .animate-dog1-exit {
   animation: dog1ExitDoor 3s ease-out forwards;
 }
 
 @keyframes dog1EnterRain {
-  0% { transform: translate(140px, 290px) scale(1); opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translate(445px, 290px) scale(0.65); opacity: 0; }
+  0% {
+    transform: translate(140px, 290px) scale(1);
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(445px, 290px) scale(0.65);
+    opacity: 0;
+  }
 }
+
 .animate-dog1-enter-rain {
   animation: dog1EnterRain 2s ease-in forwards;
 }
 
 @keyframes dog2ExitDoor {
-  0% { transform: translate(405px, 290px) scale(0.65); opacity: 0; }
-  10% { opacity: 1; }
-  100% { transform: translate(180px, 290px) scale(1); opacity: 1; }
+  0% {
+    transform: translate(405px, 290px) scale(0.65);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(180px, 290px) scale(1);
+    opacity: 1;
+  }
 }
+
 .animate-dog2-exit {
   animation: dog2ExitDoor 3s ease-out forwards;
 }
 
 @keyframes dog2EnterRain {
-  0% { transform: translate(180px, 290px) scale(1); opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translate(405px, 290px) scale(0.65); opacity: 0; }
+  0% {
+    transform: translate(180px, 290px) scale(1);
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(405px, 290px) scale(0.65);
+    opacity: 0;
+  }
 }
+
 .animate-dog2-enter-rain {
   animation: dog2EnterRain 2s ease-in forwards;
 }
@@ -1048,42 +1144,52 @@ textarea:focus {
     transform: translate(0px, 0px);
     opacity: 0;
   }
+
   4% {
     transform: translate(60px, -50px);
     opacity: 1;
   }
+
   12% {
     transform: translate(180px, -124px);
     opacity: 1;
   }
+
   18% {
     transform: translate(270px, -155px);
     opacity: 1;
   }
+
   24% {
     transform: translate(360px, -165px);
     opacity: 1;
   }
+
   30% {
     transform: translate(450px, -155px);
     opacity: 1;
   }
+
   36% {
     transform: translate(540px, -124px);
     opacity: 1;
   }
+
   42% {
     transform: translate(630px, -72px);
     opacity: 1;
   }
+
   48% {
     transform: translate(720px, -2px);
     opacity: 1;
   }
+
   50% {
     transform: translate(720px, 28px);
     opacity: 0;
   }
+
   100% {
     transform: translate(720px, 28px);
     opacity: 0;
@@ -1101,7 +1207,8 @@ textarea:focus {
 .animate-moon-cycle {
   opacity: 0;
   animation: celestialCycle 30s linear infinite;
-  animation-delay: 18.5s; /* Shifting by 15s (half of 30s loop) + 3.5s load delay */
+  animation-delay: 18.5s;
+  /* Shifting by 15s (half of 30s loop) + 3.5s load delay */
   pointer-events: none;
 }
 
@@ -1267,6 +1374,7 @@ textarea:focus {
     transform: translateX(-300px);
     opacity: 0;
   }
+
   100% {
     transform: translateX(0);
     opacity: 1;
