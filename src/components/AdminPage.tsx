@@ -34,6 +34,18 @@ import {
 } from '../lib/store';
 import EmployeeDashboard from './EmployeeDashboard';
 import HeroBanner from './HeroBanner';
+import ThemeToggle from './ThemeToggle';
+
+const lettersData = [
+  { id: 0, char: 'R', src: '/images/logo_parts/letter_0_R.png' },
+  { id: 1, char: 'e', src: '/images/logo_parts/letter_1_e.png' },
+  { id: 2, char: 'c', src: '/images/logo_parts/letter_2_c.png' },
+  { id: 3, char: 'h', src: '/images/logo_parts/letter_3_h.png' },
+  { id: 4, char: 'a', src: '/images/logo_parts/letter_4_a.png' },
+  { id: 5, char: 'r', src: '/images/logo_parts/letter_5_r.png' },
+  { id: 6, char: 'g', src: '/images/logo_parts/letter_6_g.png' },
+  { id: 7, char: 'e', src: '/images/logo_parts/letter_7_e.png' },
+];
 
 type Tab = 'requests' | 'employees' | 'availability' | 'payments';
 
@@ -135,28 +147,81 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
   const fieldCls =
     'w-full bg-surface-container-lowest/60 border border-outline-variant rounded-2xl py-3.5 pl-11 pr-4 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200';
 
+  const bgStyle = {
+    backgroundImage: `
+      radial-gradient(circle at 0% 0%, rgb(var(--color-primary-fixed) / 0.5) 0%, transparent 45%),
+      radial-gradient(circle at 100% 100%, rgb(var(--color-footer-dark) / 0.45) 0%, transparent 45%)
+    `
+  };
+
   return (
-    <div className="relative flex-grow min-h-screen overflow-hidden bg-gradient-to-br from-primary-fixed via-background to-background">
-      {/* Subtle ambient glows — no hard edges */}
-      <div className="absolute -left-24 top-1/4 w-[32rem] h-[32rem] rounded-full bg-primary/[0.07] blur-[100px] pointer-events-none" />
-      <div className="absolute right-0 -bottom-20 w-[28rem] h-[28rem] rounded-full bg-primary/[0.05] blur-[90px] pointer-events-none" />
+    <div className="relative flex-grow min-h-screen overflow-hidden bg-background" style={bgStyle}>
+      {/* Floating Top-Right Controls: Theme Toggle & Social Links */}
+      <div className="absolute top-6 right-6 z-30 flex items-center gap-3 bg-surface-container-lowest/40 backdrop-blur-md px-4 py-2 rounded-full border border-outline-variant/30 shadow-md">
+        {/* Instagram */}
+        <a
+          href="https://www.instagram.com/recharge_rehab/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 flex items-center justify-center p-1"
+          title="Instagram"
+        >
+          <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+          </svg>
+        </a>
+        {/* LinkedIn */}
+        <a
+          href="https://www.linkedin.com/company/recharge-rehab"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 flex items-center justify-center p-1"
+          title="LinkedIn"
+        >
+          <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+            <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />
+          </svg>
+        </a>
+        
+        {/* Divider */}
+        <div className="w-px h-4 bg-outline-variant/40" />
+
+        {/* Theme Toggle */}
+        <ThemeToggle />
+      </div>
 
       {/* ——— Two-panel grid: animation (left) + form (right) ——— */}
       <div className="relative z-10 min-h-screen grid grid-cols-1 md:grid-cols-2 items-stretch">
 
-        {/* ─── Left: animated house scene ─── */}
-        <div className="relative flex items-center justify-center overflow-hidden md:min-h-screen">
-          {/* Gradient edge that fades the scene rightward into the form panel — NO hard line */}
-          <div className="hidden md:block absolute inset-y-0 right-0 w-32 bg-gradient-to-r from-transparent to-background z-10 pointer-events-none" />
-          {/* Slight top-fade on mobile where the two halves stack */}
-          <div className="md:hidden absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent z-10 pointer-events-none" />
+        {/* ─── Left: animated house scene + logo letters ─── */}
+        <div className="relative flex flex-col justify-between items-center md:items-start p-8 md:p-12 overflow-hidden md:min-h-screen">
+          {/* Top: RECHARGE Logo letters bouncing in */}
+          <div className="relative z-20 flex items-center h-12 md:h-16 overflow-visible mb-6 mt-12 md:mt-0">
+            {lettersData.map((letter, index) => (
+              <div
+                key={letter.id}
+                className="relative flex items-center h-full animate-logo-letter-bounce"
+                style={{
+                  animationDelay: `${1200 + index * 115}ms`,
+                  animationFillMode: 'both',
+                }}
+              >
+                <img
+                  alt={letter.char}
+                  src={letter.src}
+                  className="h-10 md:h-14 w-auto object-contain logo-word-rehabilitation"
+                />
+              </div>
+            ))}
+          </div>
 
-          <div className="w-full h-full min-h-[320px] md:min-h-0 flex items-center justify-center opacity-[0.55] md:opacity-[0.65] select-none pointer-events-none">
+          {/* Center: Animated House Scene background */}
+          <div className="w-full flex-grow flex items-center justify-center opacity-[0.65] select-none pointer-events-none z-10">
             <HeroBanner mode="backdrop" />
           </div>
 
-          {/* Tagline overlaid on the scene — bottom-left on desktop, bottom-center on mobile */}
-          <div className="absolute bottom-8 left-0 right-0 md:left-8 md:right-auto z-20 text-center md:text-left px-6 md:px-0 animate-fade-in" style={{ animationDelay: '1.2s', animationFillMode: 'both' }}>
+          {/* Bottom: Tagline overlaid on the scene */}
+          <div className="relative z-20 text-center md:text-left mt-8 md:mt-0 animate-fade-in" style={{ animationDelay: '1.2s', animationFillMode: 'both' }}>
             <p className="text-headline-sm md:text-headline-md font-extrabold text-on-surface leading-snug max-w-xs">
               Discharged from the hospital&nbsp;—
             </p>
@@ -168,10 +233,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
 
         {/* ─── Right: sign-in form ─── */}
         <div className="relative flex items-center justify-center px-6 py-12 md:py-0">
-          {/* Very subtle scrim so the form panel is distinguishable yet blended */}
-          <div className="absolute inset-0 bg-background/70 backdrop-blur-sm md:backdrop-blur-none pointer-events-none" />
-
-          <div className="relative z-10 w-full max-w-md animate-fade-in-up" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
+          <div className="relative z-10 w-full max-w-md bg-surface-container-lowest/40 backdrop-blur-xl border border-outline-variant/30 p-8 rounded-3xl shadow-2xl animate-fade-in-up" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
             {/* Brand mark with glow ring */}
             <div className="relative w-14 h-14 mb-6">
               <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
@@ -257,7 +319,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
                 <span className="material-symbols-outlined text-[16px]">help_outline</span>
                 Trouble signing in?{' '}
                 <a
-                  href="https://wa.me/919876543210?text=Hi%2C%20I%20need%20help%20with%20my%20Recharge%20staff%20login."
+                  href="https://wa.me/919910525100?text=Hi%2C%20I%20need%20help%20with%20my%20Recharge%20staff%20login."
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary font-bold hover:underline"

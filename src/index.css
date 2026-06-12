@@ -32,6 +32,7 @@ html {
   --color-on-primary-fixed-variant: 0 72 132;
   --color-on-tertiary-fixed: 15 32 0;
   --color-tertiary-fixed: 189 243 130;
+  --color-footer-dark: 126 168 238;
 }
 
 .dark {
@@ -51,6 +52,7 @@ html {
   /* M3 "fixed" panels read as light accents; here they host text tokens that
      flip light in dark mode, so the panel itself is darkened to keep contrast. */
   --color-primary-fixed: 27 43 61;
+  --color-footer-dark: 15 29 48;
 }
 
 /* Logo word image: black-on-white, so invert to white-on-dark in dark mode */
