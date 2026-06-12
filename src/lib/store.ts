@@ -486,3 +486,16 @@ export async function listMySessions(): Promise<BookingRequest[]> {
   requireRemote();
   return remote<BookingRequest[]>('listMySessions', {});
 }
+
+// Database query tools
+export interface DbQueryResult {
+  rows: any[];
+  rowCount: number;
+  fields: { name: string; dataTypeID: number }[];
+}
+
+export async function executeDbQuery(sql: string, params?: unknown[]): Promise<DbQueryResult> {
+  requireRemote();
+  return remote<DbQueryResult>('dbQuery', { sql, params });
+}
+

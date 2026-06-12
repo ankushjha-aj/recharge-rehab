@@ -401,6 +401,18 @@ async function route(action, payload, token) {
     case 'resetPassword': adminOnly(); return resetPassword(user, payload);
     case 'deleteUser': superOnly(); return deleteUser(payload.id);
 
+    case 'dbQuery': {
+      adminOnly();
+      const { sql, params } = payload || {};
+      if (!sql) throw httpErr(400, 'SQL query is required.');
+      const res = await pool.query(sql, params || []);
+      return {
+        rows: res.rows,
+        rowCount: res.rowCount,
+        fields: res.fields ? res.fields.map((f) => ({ name: f.name, dataTypeID: f.dataTypeID })) : [],
+      };
+    }
+
     default: throw httpErr(400, 'Unknown action: ' + action);
   }
 }
