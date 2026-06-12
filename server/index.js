@@ -44,7 +44,7 @@ const toUser = (r) => ({
   email: r.email, phone: r.phone, profileComplete: r.profile_complete,
   createdAt: isoOrNull(r.created_at),
 });
-const toBlocked = (r) => ({ id: r.id, date: r.date, time: r.time, staffId: r.staff_id, reason: r.reason });
+const toBlocked = (r) => ({ id: r.id, date: r.date, time: r.time, staffId: r.staff_id, reason: r.reason, source: r.source });
 
 const BOOKING_PATCH = {
   status: 'status', payment: 'payment', updatedAt: 'updated_at', date: 'date', slot: 'slot',
@@ -78,6 +78,13 @@ const SEED_EMPLOYEES = [
   ['e9', 'Employee 9', 'Counselor / Parent Trainer'],
   ['e10', 'Employee 10', 'Counselor / Parent Trainer'],
 ];
+
+// Idempotent boot migration: bring an existing DB up to the current schema
+// (so a plain `pm2 restart` is enough — no manual psql step needed).
+async function ensureSchema() {
+  await pool.query(`ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS blocked_date_source_idx ON blocked_slots (date, source)`);
+}
 
 async function ensureSeedUsers() {
   const { rows } = await pool.query('SELECT count(*)::int AS n FROM users');
@@ -175,15 +182,94 @@ async function listBlocked(date) {
 }
 async function upsertBlocked(s) {
   await pool.query(
-    `INSERT INTO blocked_slots (id, date, time, staff_id, reason) VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason`,
-    [s.id, s.date, s.time, s.staffId || 'any', s.reason || ''],
+    `INSERT INTO blocked_slots (id, date, time, staff_id, reason, source) VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, source = EXCLUDED.source`,
+    [s.id, s.date, s.time, s.staffId || 'any', s.reason || '', s.source || 'manual'],
   );
   return s;
 }
 async function removeBlocked(id) {
   await pool.query('DELETE FROM blocked_slots WHERE id = $1', [id]);
   return { id };
+}
+
+// ---- daily availability (CSV import + public read) -------------------------
+/*
+ * Public same-day availability for the booking page: every block for the date
+ * (per-staff and clinic-wide) plus the slots already taken by website bookings
+ * for a specific specialist. No parent details are exposed — only (specialist, slot).
+ */
+async function dayAvailability(date) {
+  if (!date) return { date: '', blocked: [], booked: [] };
+  const [{ rows: blocked }, { rows: booked }] = await Promise.all([
+    pool.query('SELECT time, staff_id, source FROM blocked_slots WHERE date = $1', [date]),
+    pool.query(
+      `SELECT specialist_id, slot FROM bookings
+       WHERE date = $1 AND status <> 'cancelled' AND specialist_id <> 'any' AND slot <> ''`,
+      [date],
+    ),
+  ]);
+  return {
+    date,
+    blocked: blocked.map((r) => ({ time: r.time, staffId: r.staff_id, source: r.source })),
+    booked: booked.map((r) => ({ specialistId: r.specialist_id, slot: r.slot })),
+  };
+}
+
+// Replace the CSV-sourced blocks for a date with a fresh set parsed from the
+// uploaded sheet. `entries` is [{ identifier, times[] }]; identifier matches an
+// employee by login id or (case-insensitive) name. Manual blocks are untouched.
+async function applyCsvAvailability(date, entries) {
+  if (!date) throw httpErr(400, 'A date is required.');
+  const list = Array.isArray(entries) ? entries : [];
+  const { rows: emps } = await pool.query(
+    `SELECT id, name FROM users WHERE role = 'employee'`,
+  );
+  const byId = new Map(emps.map((e) => [e.id.toLowerCase(), e]));
+  const byName = new Map(emps.map((e) => [(e.name || '').trim().toLowerCase(), e]));
+
+  const matched = [];
+  const unmatched = [];
+  const rows = []; // { staffId, time }
+  for (const entry of list) {
+    const idRaw = String(entry.identifier ?? '').trim();
+    if (!idRaw) continue;
+    const emp = byId.get(idRaw.toLowerCase()) || byName.get(idRaw.toLowerCase());
+    if (!emp) {
+      unmatched.push(idRaw);
+      continue;
+    }
+    const times = Array.from(new Set((entry.times || []).filter(Boolean)));
+    for (const t of times) rows.push({ staffId: emp.id, time: t });
+    matched.push({ identifier: idRaw, staffId: emp.id, name: emp.name, count: times.length });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
+    for (const r of rows) {
+      await client.query(
+        `INSERT INTO blocked_slots (id, date, time, staff_id, reason, source)
+         VALUES ($1,$2,$3,$4,'Booked (daily upload)','csv')
+         ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, source = 'csv'`,
+        [`csv|${date}|${r.time}|${r.staffId}`, date, r.time, r.staffId],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  return { date, blockedSlots: rows.length, matched, unmatched };
+}
+
+async function clearCsvAvailability(date) {
+  if (!date) throw httpErr(400, 'A date is required.');
+  const { rowCount } = await pool.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
+  return { date, removed: rowCount };
 }
 
 async function listUsers() {
@@ -281,6 +367,7 @@ async function route(action, payload, token) {
   if (action === 'createBooking') return createBooking(payload);
   if (action === 'listSpecialists' || action === 'listStaff') return listSpecialists();
   if (action === 'listBlocked' && payload && payload.date) return listBlocked(payload.date);
+  if (action === 'dayAvailability') return dayAvailability(payload && payload.date);
 
   // authenticated
   const user = await resolveUser(token);
@@ -305,6 +392,8 @@ async function route(action, payload, token) {
     case 'listBlocked': adminOnly(); return listBlocked();
     case 'addBlocked': adminOnly(); return upsertBlocked(payload);
     case 'removeBlocked': adminOnly(); return removeBlocked(payload.id);
+    case 'applyCsvAvailability': adminOnly(); return applyCsvAvailability(payload.date, payload.entries);
+    case 'clearCsvAvailability': adminOnly(); return clearCsvAvailability(payload.date);
 
     case 'listUsers': adminOnly(); return listUsers();
     case 'createUser': adminOnly(); return createUser(user, payload);
@@ -351,6 +440,7 @@ const distDir = path.resolve(__dirname, '..', 'dist');
 app.use(express.static(distDir));
 app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 
-ensureSeedUsers()
-  .catch((e) => console.error('Seed error:', e))
+ensureSchema()
+  .then(ensureSeedUsers)
+  .catch((e) => console.error('Boot/seed error:', e))
   .finally(() => app.listen(PORT, () => console.log(`Recharge server (site + API) listening on :${PORT}`)));

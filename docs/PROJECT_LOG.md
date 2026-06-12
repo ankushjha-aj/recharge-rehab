@@ -68,6 +68,40 @@ see [ADMIN_SETUP.md](ADMIN_SETUP.md).
 
 ---
 
+## Daily availability (CSV) + same-day booking — 20th
+*Goal: parents book only **today's remaining** slots, and each therapist's already-booked
+times are hidden once the admin uploads the morning schedule.*
+
+- **`blocked_slots.source`** column added (`manual` | `csv`). Re-uploading the daily CSV
+  replaces only that day's `csv` blocks; clinic-wide **manual** blocks are untouched.
+  (Boot migration in `server/index.js` → `pm2 restart` is enough; no manual SQL.)
+- **Admin → Availability → Daily availability upload**: pick the date (defaults today),
+  upload a CSV, get a summary (slots blocked, therapists matched, unmatched names). A
+  per-employee list shows what's currently blocked, with **Clear upload**. A **Template**
+  button downloads a starter sheet. Manual clinic-wide blocks live in their own card.
+- **CSV format** — one row per therapist; first cell is their **login id or name**, the
+  rest are booked times (comma/space separated):
+  ```csv
+  employee,times
+  e1,10:00 10:45 11:30
+  e3,12:15, 13:00
+  Employee 5,all
+  ```
+  `all` / `leave` / `off` = whole day unavailable. Times accept `10:00`, `10am`,
+  `10:00 AM`. Parsing/normalising lives in `parseAvailabilityCsv` / `normalizeSlotTime`
+  (`src/lib/store.ts`).
+- **Booking page** ([`BookingPage.tsx`](../src/components/BookingPage.tsx)):
+  - Date is **locked to today** (same-day only) — the picker is now a read-only chip.
+  - Removed the old *fake* random occupancy. Real availability comes from public
+    `dayAvailability(date)` = per-staff CSV/manual blocks + slots already taken by
+    website bookings. Slots whose time has **passed** are greyed too.
+  - **Popups**: selected therapist full → *"pick another therapist"*; every therapist
+    full → *"contact us directly"* (WhatsApp); after hours → *"today's sessions are over."*
+- API: public `dayAvailability`; admin `applyCsvAvailability`, `clearCsvAvailability`.
+- Commit `feature: First draft 20th commit`.
+
+---
+
 ## Current architecture
 ```
 Browser ──HTTP:3000──> Node/Express (server/) ──> PostgreSQL (recharge_rehab)

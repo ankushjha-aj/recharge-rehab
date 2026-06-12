@@ -31,14 +31,19 @@ CREATE TABLE IF NOT EXISTS staff (
 );
 
 CREATE TABLE IF NOT EXISTS blocked_slots (
-  id       TEXT PRIMARY KEY,            -- `${date}|${time}|${staff_id}`
+  id       TEXT PRIMARY KEY,            -- `${date}|${time}|${staff_id}` (manual) / `csv|…` (import)
   date     TEXT NOT NULL,               -- yyyy-mm-dd
   time     TEXT NOT NULL,               -- HH:mm
-  staff_id TEXT NOT NULL DEFAULT 'any', -- 'any' blocks the time for everyone
+  staff_id TEXT NOT NULL DEFAULT 'any', -- 'any' blocks the time for everyone; else a specific employee
   reason   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS blocked_date_idx ON blocked_slots (date);
+
+-- Where a block came from: 'manual' (Availability tab) or 'csv' (daily import).
+-- Lets a re-upload replace only that day's CSV blocks and leave manual ones intact.
+ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+CREATE INDEX IF NOT EXISTS blocked_date_source_idx ON blocked_slots (date, source);
 
 -- Seed the 10 reference staff once (no-op if they already exist).
 INSERT INTO staff (id, name, role, active) VALUES

@@ -17,6 +17,10 @@ import {
   listBlocked,
   addBlocked,
   removeBlocked,
+  applyCsvAvailability,
+  clearCsvAvailability,
+  parseAvailabilityCsv,
+  todayISO,
   SLOT_TIMES,
   formatSlot,
   type BookingRequest,
@@ -26,6 +30,7 @@ import {
   type User,
   type Role,
   type BlockedSlot,
+  type CsvApplyResult,
 } from '../lib/store';
 import EmployeeDashboard from './EmployeeDashboard';
 
@@ -257,7 +262,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
           <RequestsTab bookings={bookings} staffName={staffName} isSuper={isSuper} unseenSessions={unseenSessions} unseenConsults={unseenConsults} onChange={refresh} />
         )}
         {tab === 'employees' && <EmployeesTab users={users} me={user} isSuper={isSuper} onChange={refresh} />}
-        {tab === 'availability' && <AvailabilityTab />}
+        {tab === 'availability' && <AvailabilityTab users={users} />}
         {tab === 'payments' && <PaymentsTab bookings={bookings} onChange={refresh} />}
       </div>
     </div>
@@ -590,10 +595,10 @@ const EditUserModal: React.FC<{ u: User; isSuper: boolean; onClose: () => void; 
 };
 
 // ---------------------------------------------------------------------------
-// Availability
+// Availability — daily CSV import + per-employee view + manual clinic-wide blocks
 // ---------------------------------------------------------------------------
-const AvailabilityTab: React.FC = () => {
-  const today = new Date().toISOString().slice(0, 10);
+const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
+  const today = todayISO();
   const [date, setDate] = useState(today);
   const [blocked, setBlocked] = useState<BlockedSlot[]>([]);
 
@@ -617,27 +622,195 @@ const AvailabilityTab: React.FC = () => {
   const isSunday = new Date(date + 'T00:00:00').getDay() === 0;
 
   return (
-    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 md:p-7 shadow-sm">
-      <div className="flex flex-wrap items-center gap-3 mb-5">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end gap-3">
         <Field label="Date"><input type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
-        <p className="text-body-sm text-on-surface-variant self-end">Click a time to block / unblock it. Blocked times disappear from the public booking grid.</p>
+        <p className="text-body-sm text-on-surface-variant pb-2.5">
+          Upload the morning's schedule below to block each therapist's booked times for this date.
+        </p>
       </div>
-      {isSunday ? (
-        <p className="text-body-md text-on-surface-variant">Sunday is closed — no slots to manage.</p>
-      ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
-          {SLOT_TIMES.map((t) => {
-            const b = blockedTimes.has(t);
-            return (
-              <button key={t} onClick={() => toggle(t)} className={`py-2.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${b ? 'bg-[#FEE4E2] text-[#B42318] border-[#FDA29B] line-through' : 'bg-transparent text-on-surface border-outline-variant hover:border-primary hover:text-primary'}`}>
-                {formatSlot(t)}
-              </button>
-            );
-          })}
+
+      <CsvImportCard date={date} users={users} blocked={blocked} onChange={() => load(date)} />
+
+      {/* Manual clinic-wide blocks (closes a time for everyone). */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 md:p-7 shadow-sm">
+        <h3 className="text-headline-sm font-bold text-on-surface mb-1">Clinic-wide blocks</h3>
+        <p className="text-body-sm text-on-surface-variant mb-4">Click a time to close it for <strong>every</strong> therapist (e.g. a clinic break). Separate from the CSV import.</p>
+        {isSunday ? (
+          <p className="text-body-md text-on-surface-variant">Sunday is closed — no slots to manage.</p>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+            {SLOT_TIMES.map((t) => {
+              const b = blockedTimes.has(t);
+              return (
+                <button key={t} onClick={() => toggle(t)} className={`py-2.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${b ? 'bg-[#FEE4E2] text-[#B42318] border-[#FDA29B] line-through' : 'bg-transparent text-on-surface border-outline-variant hover:border-primary hover:text-primary'}`}>
+                  {formatSlot(t)}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Daily CSV importer: upload a sheet of each therapist's booked times → block them.
+const CsvImportCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlot[]; onChange: () => void }> = ({ date, users, blocked, onChange }) => {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CsvApplyResult | null>(null);
+  const [warn, setWarn] = useState<string>('');
+  const [err, setErr] = useState('');
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const employees = useMemo(() => users.filter((u) => u.role === 'employee'), [users]);
+  const nameOf = (id: string) => employees.find((u) => u.id === id)?.name || id;
+
+  // CSV blocks already saved for this date, grouped by employee.
+  const csvByStaff = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const b of blocked) {
+      if (b.source !== 'csv') continue;
+      m.set(b.staffId, [...(m.get(b.staffId) || []), b.time].sort());
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [blocked]);
+
+  const handleFile = async (file: File) => {
+    setErr('');
+    setWarn('');
+    setResult(null);
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const { entries, badTimes } = parseAvailabilityCsv(text);
+      if (entries.length === 0) {
+        setErr('No usable rows found. Each line should be: employee id (or name), then their booked times.');
+        return;
+      }
+      const res = await applyCsvAvailability(date, entries);
+      setResult(res);
+      if (badTimes.length) setWarn(`Ignored ${badTimes.length} unrecognised time(s): ${badTimes.slice(0, 6).join(', ')}${badTimes.length > 6 ? '…' : ''}`);
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const downloadTemplate = () => {
+    const lines = ['employee,times', ...employees.map((u) => `${u.id},`)];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `availability-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearCsv = async () => {
+    if (!confirm(`Clear all uploaded availability for ${date}? Manual clinic-wide blocks stay.`)) return;
+    setBusy(true);
+    try {
+      await clearCsvAvailability(date);
+      setResult(null);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 md:p-7 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h3 className="text-headline-sm font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span className="material-symbols-outlined text-[22px] text-primary">upload_file</span>
+            Daily availability upload
+          </h3>
+          <p className="text-body-sm text-on-surface-variant max-w-xl">
+            Upload each morning's CSV of therapists' booked times. Those slots vanish from the public booking grid for
+            <strong> {prettyAdminDate(date)}</strong>. Re-uploading replaces this day's import.
+          </p>
+        </div>
+        <button onClick={downloadTemplate} className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary px-3.5 py-2 rounded-full font-bold text-xs transition-colors">
+          <span className="material-symbols-outlined text-[16px]">download</span>Template
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm cursor-pointer transition-all active:scale-95 ${busy ? 'bg-surface-container-high text-on-surface-variant cursor-wait' : 'bg-primary text-on-primary hover:brightness-95 shadow-md'}`}>
+          <span className="material-symbols-outlined text-[18px]">{busy ? 'hourglass_top' : 'upload'}</span>
+          {busy ? 'Uploading…' : 'Upload CSV'}
+          <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" disabled={busy} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+        </label>
+        {csvByStaff.length > 0 && (
+          <button onClick={clearCsv} disabled={busy} className="flex items-center gap-1.5 border border-[#FDA29B] text-[#B42318] hover:bg-[#FEE4E2] px-4 py-2 rounded-full font-bold text-sm transition-colors disabled:opacity-60">
+            <span className="material-symbols-outlined text-[16px]">delete_sweep</span>Clear upload
+          </button>
+        )}
+      </div>
+
+      {/* Format hint */}
+      <details className="mt-4 group">
+        <summary className="cursor-pointer text-body-sm font-bold text-primary select-none">CSV format</summary>
+        <div className="mt-2 text-body-sm text-on-surface-variant space-y-1">
+          <p>One row per therapist: their <strong>id or name</strong> first, then their booked times (comma or space separated).</p>
+          <pre className="bg-surface-container-high/50 border border-outline-variant rounded-xl p-3 text-xs text-on-surface overflow-x-auto">{`employee,times
+e1,10:00 10:45 11:30
+e3,12:15, 13:00
+Employee 5,all`}</pre>
+          <p>Times accept <code>10:00</code>, <code>10am</code> or <code>10:00 AM</code>. Use <code>all</code> / <code>leave</code> / <code>off</code> to block a therapist's whole day.</p>
+        </div>
+      </details>
+
+      {err && <p className="mt-3 text-body-sm text-[#B42318] flex items-center gap-1.5"><span className="material-symbols-outlined text-[18px]">error</span>{err}</p>}
+      {warn && <p className="mt-3 text-body-sm text-[#B54708] flex items-center gap-1.5"><span className="material-symbols-outlined text-[18px]">warning</span>{warn}</p>}
+      {result && (
+        <div className="mt-3 bg-[#D1FADF]/40 border border-[#A6F4C5] rounded-xl px-4 py-3 text-body-sm text-[#027A48]">
+          ✓ Blocked <strong>{result.blockedSlots}</strong> slot{result.blockedSlots === 1 ? '' : 's'} across <strong>{result.matched.length}</strong> therapist{result.matched.length === 1 ? '' : 's'}.
+          {result.unmatched.length > 0 && (
+            <span className="text-[#B42318]"> Couldn't match: {result.unmatched.join(', ')} — check the id/name spelling.</span>
+          )}
+        </div>
+      )}
+
+      {/* What's currently blocked by the upload */}
+      {csvByStaff.length > 0 && (
+        <div className="mt-5">
+          <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-2 text-xs">Booked today (from upload)</h4>
+          <div className="space-y-2">
+            {csvByStaff.map(([staffId, times]) => {
+              const fullDay = times.length >= SLOT_TIMES.length;
+              return (
+                <div key={staffId} className="flex flex-wrap items-center gap-2 bg-surface-container-high/30 border border-outline-variant/60 rounded-xl px-3 py-2">
+                  <span className="font-bold text-on-surface text-sm min-w-[8rem]">{nameOf(staffId)}</span>
+                  {fullDay ? (
+                    <Pill cls="bg-[#FEE4E2] text-[#B42318]">Unavailable all day</Pill>
+                  ) : (
+                    times.map((t) => (
+                      <span key={t} className="text-[11px] font-bold text-[#B42318] bg-[#FEE4E2] px-2 py-0.5 rounded-full">{formatSlot(t)}</span>
+                    ))
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
+};
+
+const prettyAdminDate = (iso: string) => {
+  try {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch {
+    return iso;
+  }
 };
 
 // ---------------------------------------------------------------------------

@@ -64,6 +64,20 @@ export interface BlockedSlot {
   time: string;
   staffId: string;
   reason: string;
+  source?: 'manual' | 'csv';
+}
+
+/** Same-day availability for the public booking grid (see dayAvailability). */
+export interface DayAvailability {
+  date: string;
+  blocked: { time: string; staffId: string; source?: string }[]; // staffId 'any' = clinic-wide
+  booked: { specialistId: string; slot: string }[]; // slots already taken via the website
+}
+
+/** One employee's busy times for a day, parsed from the admin's daily CSV. */
+export interface CsvAvailabilityEntry {
+  identifier: string; // employee login id or name as written in the sheet
+  times: string[]; // canonical 'HH:mm' values (already expanded for full-day)
 }
 
 export type NewBooking = Omit<BookingRequest, 'id' | 'status' | 'payment' | 'seen' | 'requestedAt' | 'updatedAt'>;
@@ -77,6 +91,109 @@ export const formatSlot = (t: string): string => {
   const hr = h % 12 === 0 ? 12 : h % 12;
   return `${hr}:${m.toString().padStart(2, '0')} ${period}`;
 };
+
+// Today's date as a local yyyy-mm-dd (parents can only book same-day).
+export const todayISO = (): string => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+// Minutes-since-midnight of a 'HH:mm' slot, for past-slot greying.
+export const slotMinutes = (t: string): number => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+};
+
+const FULL_DAY_WORDS = new Set(['all', 'full', 'off', 'leave', 'busy', 'unavailable', 'holiday', 'closed']);
+
+/**
+ * Normalise a single time token from the CSV to a canonical SLOT_TIMES value.
+ * Accepts '10:00', '10', '10am', '10:00 AM', '1pm', '13:00'. Returns null if it
+ * isn't a recognised clinic slot.
+ */
+export const normalizeSlotTime = (raw: string): string | null => {
+  const s = raw.trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  const t = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  return SLOT_TIMES.includes(t) ? t : null;
+};
+
+/**
+ * Parse the admin's daily availability CSV into per-employee busy times.
+ * Layout (header row optional):  employee, time, time, …
+ *   e1, 10:00, 10:45 11:30          → e1 busy at those three slots
+ *   Employee 3, all                 → Employee 3 unavailable all day
+ * The first cell is the employee (login id OR name); the rest are times (comma,
+ * space or semicolon separated). 'all'/'off'/'leave' = the whole day.
+ * Returns the entries plus any unrecognised time tokens (for a warning).
+ */
+export function parseAvailabilityCsv(text: string): { entries: CsvAvailabilityEntry[]; badTimes: string[] } {
+  const entries: CsvAvailabilityEntry[] = [];
+  const badTimes: string[] = [];
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const cells = line.split(',').map((c) => c.trim()).filter((c, i) => i === 0 || c.length > 0);
+    const identifier = cells[0];
+    if (!identifier) continue;
+    // Skip an obvious header row.
+    if (/^(employee|name|staff|therapist|id)$/i.test(identifier) && cells.length <= 1) continue;
+    if (entries.length === 0 && /^(employee|name|staff|therapist|id)$/i.test(identifier)) {
+      const rest = cells.slice(1).join(' ').toLowerCase();
+      if (/time|slot|busy|session/.test(rest)) continue; // header line
+    }
+    const tokens = cells.slice(1).flatMap((c) => c.split(/[\s;]+/)).filter(Boolean);
+    const times = new Set<string>();
+    let fullDay = false;
+    for (const tok of tokens) {
+      if (FULL_DAY_WORDS.has(tok.toLowerCase())) {
+        fullDay = true;
+        continue;
+      }
+      const t = normalizeSlotTime(tok);
+      if (t) times.add(t);
+      else badTimes.push(`${identifier}: "${tok}"`);
+    }
+    if (fullDay) SLOT_TIMES.forEach((t) => times.add(t));
+    if (times.size === 0 && !fullDay) continue;
+    entries.push({ identifier, times: SLOT_TIMES.filter((t) => times.has(t)) });
+  }
+  return { entries, badTimes };
+}
+
+/** Is a specific employee busy at `time` (clinic-wide block, own block, or a booking)? */
+export function isStaffBusyAt(avail: DayAvailability, staffId: string, time: string): boolean {
+  for (const b of avail.blocked) {
+    if (b.time === time && (b.staffId === 'any' || b.staffId === staffId)) return true;
+  }
+  for (const b of avail.booked) {
+    if (b.slot === time && b.specialistId === staffId) return true;
+  }
+  return false;
+}
+
+/**
+ * The set of times unavailable for a given selection.
+ *   - a specific specialist: their own blocks + clinic-wide blocks + their bookings
+ *   - 'any': only times where every active specialist is busy (no one free)
+ */
+export function takenTimesFor(avail: DayAvailability, specialistId: string, specialists: Staff[]): Set<string> {
+  const out = new Set<string>();
+  if (specialistId !== 'any') {
+    for (const t of SLOT_TIMES) if (isStaffBusyAt(avail, specialistId, t)) out.add(t);
+    return out;
+  }
+  const active = specialists.filter((s) => s.active);
+  for (const t of SLOT_TIMES) {
+    const clinicWide = avail.blocked.some((b) => b.time === t && b.staffId === 'any');
+    if (clinicWide || (active.length > 0 && active.every((s) => isStaffBusyAt(avail, s.id, t)))) out.add(t);
+  }
+  return out;
+}
 
 // Local-only fallback specialist list (used when no backend is configured).
 export const DEFAULT_STAFF: Staff[] = [
@@ -250,6 +367,22 @@ export async function blockedTimesFor(date: string): Promise<Set<string>> {
   }
 }
 
+// Full same-day availability for the public booking grid (per-staff blocks +
+// slots already taken by website bookings). Empty/offline → nothing taken.
+export async function dayAvailability(date: string): Promise<DayAvailability> {
+  const empty: DayAvailability = { date, blocked: [], booked: [] };
+  if (!date) return empty;
+  if (isRemote()) {
+    try {
+      return await remote<DayAvailability>('dayAvailability', { date }, false);
+    } catch {
+      return empty;
+    }
+  }
+  const all = lread<BlockedSlot[]>(LKEYS.blocked, []).filter((b) => b.date === date);
+  return { date, blocked: all.map((b) => ({ time: b.time, staffId: b.staffId, source: b.source })), booked: [] };
+}
+
 // ===========================================================================
 // Admin — bookings (remote-only)
 // ===========================================================================
@@ -284,6 +417,23 @@ export async function addBlocked(date: string, time: string, staffId = 'any', re
 export async function removeBlocked(id: string): Promise<void> {
   requireRemote();
   await remote('removeBlocked', { id });
+}
+
+export interface CsvApplyResult {
+  date: string;
+  blockedSlots: number;
+  matched: { identifier: string; staffId: string; name: string; count: number }[];
+  unmatched: string[];
+}
+
+// Replace a day's CSV-imported blocks with a freshly parsed set (manual blocks untouched).
+export async function applyCsvAvailability(date: string, entries: CsvAvailabilityEntry[]): Promise<CsvApplyResult> {
+  requireRemote();
+  return remote<CsvApplyResult>('applyCsvAvailability', { date, entries });
+}
+export async function clearCsvAvailability(date: string): Promise<{ date: string; removed: number }> {
+  requireRemote();
+  return remote<{ date: string; removed: number }>('clearCsvAvailability', { date });
 }
 
 // ===========================================================================

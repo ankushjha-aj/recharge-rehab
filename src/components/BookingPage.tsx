@@ -1,5 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { submitBooking, blockedTimesFor, listSpecialists, SLOT_TIMES, formatSlot, type Staff } from '../lib/store';
+import {
+  submitBooking,
+  dayAvailability,
+  listSpecialists,
+  takenTimesFor,
+  todayISO,
+  slotMinutes,
+  SLOT_TIMES,
+  formatSlot,
+  type Staff,
+  type DayAvailability,
+} from '../lib/store';
 
 interface BookingPageProps {
   onBookConsultation?: () => void;
@@ -14,22 +25,21 @@ const sessionTypes: { id: string; label: string; icon: string }[] = [
   { id: 'follow-up', label: 'Follow-up Session', icon: 'event_repeat' },
 ];
 
-/*
- * Deterministic pseudo-occupancy: each date shows a believable, stable set of
- * already-taken slots so parents see that some times are unavailable. This is a
- * visual baseline; admin-blocked times (from the store) are layered on top.
- */
-const isSlotOccupied = (dateStr: string, time: string) => {
-  const s = dateStr + '|' + time;
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 10 < 4; // ~40% taken
+// Friendly label for today's locked booking date, e.g. "Monday, 1 July 2026".
+const prettyDate = (iso: string) => {
+  try {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
 };
 
-const todayStr = () => {
+// Current local time as minutes since midnight (for hiding slots already past).
+const nowMinutes = () => {
   const d = new Date();
-  const off = d.getTimezoneOffset();
-  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+  return d.getHours() * 60 + d.getMinutes();
 };
 
 const StepCard: React.FC<{ n: string; icon: string; title: string; desc: string }> = ({ n, icon, title, desc }) => (
@@ -48,49 +58,70 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
   const [sessionType, setSessionType] = useState('consultation');
   const [specialist, setSpecialist] = useState('any');
   const [specialists, setSpecialists] = useState<Staff[]>([]);
-  const [date, setDate] = useState('');
+  // Parents can only book for the day they visit — the date is locked to today.
+  const [date] = useState(todayISO);
   const [slot, setSlot] = useState('');
   const [parentName, setParentName] = useState('');
   const [childAge, setChildAge] = useState('');
   const [phone, setPhone] = useState('');
   const [concern, setConcern] = useState('');
   const [notes, setNotes] = useState('');
-  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const [avail, setAvail] = useState<DayAvailability>({ date, blocked: [], booked: [] });
+  const [nowMin, setNowMin] = useState(nowMinutes);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
 
   React.useEffect(() => {
     document.title = 'Book a Session - Recharge Rehabilitation';
     listSpecialists().then(setSpecialists).catch(() => setSpecialists([]));
-  }, []);
-
-  const isSunday = useMemo(() => (date ? new Date(date + 'T00:00:00').getDay() === 0 : false), [date]);
-
-  // Load admin-blocked times for the chosen date (real availability once the
-  // Google Sheets backend is configured; empty otherwise).
-  React.useEffect(() => {
-    if (!date) {
-      setBlocked(new Set());
-      return;
-    }
-    let active = true;
-    blockedTimesFor(date).then((s) => {
-      if (active) setBlocked(s);
-    });
-    return () => {
-      active = false;
-    };
+    dayAvailability(date).then(setAvail).catch(() => setAvail({ date, blocked: [], booked: [] }));
+    // Keep "past slot" greying fresh as the day rolls on.
+    const id = setInterval(() => setNowMin(nowMinutes()), 60_000);
+    return () => clearInterval(id);
   }, [date]);
 
-  const slotTaken = (t: string) => isSlotOccupied(date, t) || blocked.has(t);
+  const isSunday = useMemo(() => new Date(date + 'T00:00:00').getDay() === 0, [date]);
 
-  // Reset slot if the date changes and the previously-picked slot is gone/occupied.
+  // Slots still bookable today (clinic day not yet past for that time).
+  const remainingSlots = useMemo(() => SLOT_TIMES.filter((t) => slotMinutes(t) > nowMin), [nowMin]);
+
+  // Times unavailable for the current pick, and — for the popups — for anyone.
+  const takenForSel = useMemo(() => takenTimesFor(avail, specialist, specialists), [avail, specialist, specialists]);
+  const takenForAny = useMemo(() => takenTimesFor(avail, 'any', specialists), [avail, specialists]);
+
+  const slotTaken = (t: string) => slotMinutes(t) <= nowMin || takenForSel.has(t);
+
+  // Reset the picked slot if it becomes unavailable (time passes / specialist changes).
   React.useEffect(() => {
     if (slot && (isSunday || slotTaken(slot))) setSlot('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, slot, isSunday, blocked]);
+  }, [specialist, isSunday, takenForSel, nowMin]);
+
+  // --- availability popups ---------------------------------------------------
+  const ready = specialists.length > 0; // wait for data before judging "fully booked"
+  const dayOver = ready && !isSunday && remainingSlots.length === 0;
+  const everyoneFull =
+    ready && !isSunday && remainingSlots.length > 0 && remainingSlots.every((t) => takenForAny.has(t));
+  const specialistFull =
+    ready && !isSunday && specialist !== 'any' && remainingSlots.length > 0 &&
+    remainingSlots.every((t) => takenForSel.has(t));
+
+  const popupKind: 'day-over' | 'all-full' | 'specialist-full' | null = isSunday
+    ? null
+    : dayOver
+    ? 'day-over'
+    : everyoneFull
+    ? 'all-full'
+    : specialistFull
+    ? 'specialist-full'
+    : null;
+  const popupKey = `${popupKind}:${popupKind === 'specialist-full' ? specialist : ''}`;
+  const showPopup = popupKind !== null && !dismissed.has(popupKey);
+  const dismissPopup = () => setDismissed((prev) => new Set(prev).add(popupKey));
+  const selectedSpecialistName = specialists.find((s) => s.id === specialist)?.name || 'This therapist';
 
   const canSubmit =
-    !!parentName.trim() && !!phone.trim() && !!childAge.trim() && !!date && !!slot && !isSunday;
+    !!parentName.trim() && !!phone.trim() && !!childAge.trim() && !!slot && !isSunday && !slotTaken(slot);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,39 +308,55 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
                 </select>
               </div>
 
-              {/* Date + slots */}
+              {/* Date (locked to today) + slots */}
               <div>
-                <label htmlFor="date" className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">
-                  Preferred Date &amp; Time
+                <label className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">
+                  Choose a Time for Today
                 </label>
-                <input
-                  id="date"
-                  type="date"
-                  min={todayStr()}
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className={`${inputClass} max-w-xs mb-2`}
-                />
-                <p className="text-body-sm text-on-surface-variant mb-4">Working hours: Mon–Sat, 10:00 AM – 5:45 PM · Sunday closed</p>
+                <div className="flex items-center gap-2.5 bg-primary-fixed/60 border border-primary/20 rounded-2xl px-4 py-3 max-w-md mb-2">
+                  <span className="material-symbols-outlined text-[20px] text-primary">event_available</span>
+                  <span className="text-body-md font-bold text-on-surface">{prettyDate(date)}</span>
+                  <span className="ml-auto text-[11px] font-extrabold uppercase tracking-wider text-primary bg-surface-container-lowest px-2 py-1 rounded-full">Today</span>
+                </div>
+                <p className="text-body-sm text-on-surface-variant mb-4">
+                  Same-day booking · Working hours Mon–Sat, 10:00 AM – 5:45 PM · Sunday closed
+                </p>
 
-                {date && isSunday && (
+                {isSunday && (
                   <div className="flex items-center gap-2 text-body-sm text-[#b54708] bg-[#FEF0C7]/60 border border-[#FEC84B]/60 rounded-xl px-4 py-3">
                     <span className="material-symbols-outlined text-[18px]">info</span>
-                    We're closed on Sundays. Please choose another day.
+                    We're closed on Sundays. Please reach us on WhatsApp and we'll help you book the next working day.
                   </div>
                 )}
 
-                {date && !isSunday && (
+                {!isSunday && dayOver && (
+                  <div className="flex items-center gap-2 text-body-sm text-[#b54708] bg-[#FEF0C7]/60 border border-[#FEC84B]/60 rounded-xl px-4 py-3">
+                    <span className="material-symbols-outlined text-[18px]">schedule</span>
+                    Today's sessions are over. Please come back tomorrow or contact us directly to book.
+                  </div>
+                )}
+
+                {!isSunday && !dayOver && (
                   <>
+                    {(everyoneFull || specialistFull) && (
+                      <div className="flex items-start gap-2 text-body-sm text-[#b54708] bg-[#FEF0C7]/60 border border-[#FEC84B]/60 rounded-xl px-4 py-3 mb-3">
+                        <span className="material-symbols-outlined text-[18px]">info</span>
+                        {everyoneFull
+                          ? 'All therapists are fully booked today. Please contact us directly to be fitted in.'
+                          : `${selectedSpecialistName} is fully booked today — please pick another therapist below.`}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
                       {SLOT_TIMES.map((t) => {
-                        const occupied = slotTaken(t);
+                        const past = slotMinutes(t) <= nowMin;
+                        const occupied = past || takenForSel.has(t);
                         const selected = slot === t;
                         return (
                           <button
                             key={t}
                             type="button"
                             disabled={occupied}
+                            title={past ? 'This time has passed' : occupied ? 'Already booked' : undefined}
                             onClick={() => setSlot(t)}
                             className={`py-2.5 rounded-xl text-sm font-bold border transition-all duration-200 ${
                               occupied
@@ -326,7 +373,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
                     </div>
                     <p className="text-body-sm text-on-surface-variant mt-3 flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-[16px] text-primary">lightbulb</span>
-                      Greyed-out times are already booked. Final confirmation is done by our team.
+                      Greyed-out times are already booked or have passed. Final confirmation is done by our team.
                     </p>
                   </>
                 )}
@@ -407,6 +454,64 @@ const BookingPage: React.FC<BookingPageProps> = ({ onBookConsultation }) => {
           </div>
         </div>
       </section>
+
+      {/* Availability popup: selected therapist full, everyone full, or day over. */}
+      {showPopup && (
+        <div className="fixed inset-0 z-[120] bg-black/55 flex items-center justify-center p-4" onClick={dismissPopup}>
+          <div
+            className="w-full max-w-md bg-surface-container-lowest border border-outline-variant rounded-[1.75rem] p-7 shadow-2xl text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={`w-16 h-16 rounded-full grid place-items-center mx-auto mb-5 ${popupKind === 'specialist-full' ? 'bg-primary-fixed text-primary' : 'bg-[#FEF0C7] text-[#B54708]'}`}>
+              <span className="material-symbols-outlined text-[32px]">
+                {popupKind === 'specialist-full' ? 'group' : popupKind === 'day-over' ? 'schedule' : 'event_busy'}
+              </span>
+            </div>
+            <h3 className="text-headline-sm font-extrabold text-on-surface mb-2">
+              {popupKind === 'specialist-full'
+                ? `${selectedSpecialistName} is fully booked today`
+                : popupKind === 'day-over'
+                ? "Today's sessions are over"
+                : 'All therapists are booked today'}
+            </h3>
+            <p className="text-body-md text-on-surface-variant leading-relaxed mb-6">
+              {popupKind === 'specialist-full'
+                ? 'Every slot for this therapist is taken today. Please choose another therapist below, or contact us and we\'ll help you find the earliest opening.'
+                : popupKind === 'day-over'
+                ? 'Same-day booking has closed for today. Please come back tomorrow during working hours, or reach us directly to arrange a slot.'
+                : 'All of our therapists are fully booked for today. Please contact us directly on WhatsApp or by phone and we\'ll do our best to fit you in.'}
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              {popupKind === 'specialist-full' ? (
+                <button
+                  type="button"
+                  onClick={() => { setSpecialist('any'); dismissPopup(); }}
+                  className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition-all duration-200 shadow-md"
+                >
+                  Show all available therapists
+                </button>
+              ) : (
+                <a
+                  href={`https://wa.me/919910525100?text=${encodeURIComponent("Hello Recharge Rehabilitation, I'd like to book a session for today but the slots show full. Could you help me find an opening?")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition-all duration-200 shadow-md flex items-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chat</span>
+                  Contact us on WhatsApp
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={dismissPopup}
+                className="border border-outline-variant text-on-surface-variant px-6 py-3 rounded-full font-bold text-sm hover:border-primary hover:text-primary transition-colors duration-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
