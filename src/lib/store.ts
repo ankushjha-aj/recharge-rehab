@@ -86,7 +86,10 @@ export const DEFAULT_STAFF: Staff[] = [
 // ---------------------------------------------------------------------------
 
 const ENV = import.meta.env as Record<string, string | undefined>;
-const REMOTE_ENDPOINT = ENV.VITE_SHEETS_ENDPOINT || '';
+// Remote backend endpoint. Prefer the Postgres API (VITE_API_ENDPOINT); the older
+// Google Apps Script var (VITE_SHEETS_ENDPOINT) is kept as a fallback alias. Both
+// speak the same { action, token, payload } protocol, so the rest is identical.
+const REMOTE_ENDPOINT = ENV.VITE_API_ENDPOINT || ENV.VITE_SHEETS_ENDPOINT || '';
 export const ADMIN_PASSCODE = ENV.VITE_ADMIN_PASSCODE || 'recharge2026';
 
 export const isRemote = (): boolean => REMOTE_ENDPOINT.length > 0;

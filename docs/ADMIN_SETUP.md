@@ -1,8 +1,67 @@
 # Booking + Admin Panel — Setup Guide
 
-This explains how bookings are stored and how to take the admin panel **live** with
-Google Sheets. Until you do step B, everything runs in **local demo mode** (data is
-saved only in the browser you're using — fine for trying it out, not for real use).
+**Active backend: PostgreSQL** (installed and running on this server). The booking
+page, contact form, and `/admin` panel all read/write a Postgres database through a
+small Node API. See **"PostgreSQL backend"** below for how it's wired and operated.
+
+> The Google Sheets path (further down) is kept only as an alternative. The app's
+> data layer (`src/lib/store.ts`) is backend-agnostic, so switching backends only
+> changes config — not page or admin code.
+
+---
+
+## PostgreSQL backend (current)
+
+### What's running
+| Piece | Detail |
+|-------|--------|
+| Database | PostgreSQL 16, db `recharge_rehab`, owner role `recharge_app`, port `5432` |
+| Tables | `bookings`, `staff` (10 seeded), `blocked_slots` — see [`server/schema.sql`](../server/schema.sql) |
+| API | Node/Express in [`server/`](../server), PM2 process **`recharge-api`** on port `4000` |
+| Frontend wiring | `VITE_API_ENDPOINT=/api` in `.env`; Vite proxies `/api` → `:4000` in dev |
+| Secrets | DB password + `ADMIN_TOKEN` live in `server/.env` (gitignored, chmod 600) |
+
+### Operating it
+```bash
+pm2 status                       # see recharge-api + recharge-rehab
+pm2 restart recharge-api         # after editing server code or server/.env
+pm2 logs recharge-api            # tail API logs
+curl -s localhost:4000/api/health
+
+# Open the database directly:
+set -a; . server/.env; set +a
+psql "$DATABASE_URL"             # then: SELECT * FROM bookings;
+psql "$DATABASE_URL" -f server/schema.sql   # re-apply schema (idempotent)
+```
+
+### Change the admin passcode
+It must match in **two** places, then restart/rebuild:
+1. `ADMIN_TOKEN` in `server/.env`  → `pm2 restart recharge-api`
+2. `VITE_ADMIN_PASSCODE` in `.env` → `npm run build` (and restart the static serve)
+
+### Production access (important)
+In dev, Vite proxies `/api` to the API. The static production build (`serve -s dist`)
+does **not** proxy, so pick one:
+- **Recommended — reverse proxy** (same origin, no CORS). With nginx in front:
+  ```nginx
+  location /api/ { proxy_pass http://127.0.0.1:4000/api/; }
+  location /     { try_files $uri /index.html; }   # SPA + static
+  ```
+- **Or absolute URL** — set `VITE_API_ENDPOINT=http://YOUR_SERVER_IP:4000/api` in
+  `.env` and rebuild. CORS is already enabled on the API. (Open port 4000 / use
+  HTTPS as appropriate.)
+
+### Restart-safety
+`pm2 save` has been run so the API comes back with `pm2 resurrect`. To start PM2 on
+boot, run `pm2 startup` once and follow the printed command.
+
+---
+
+## (Alternative) Google Sheets backend
+
+This explains how to instead store bookings in **Google Sheets**. Skip it if you're
+using Postgres above. Until configured, the app falls back to **local demo mode**
+(data saved only in the current browser — fine for trying out, not for real use).
 
 ---
 

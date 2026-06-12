@@ -16,5 +16,20 @@ module.exports = {
       max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     },
+    {
+      // Postgres-backed booking/admin API. Reads its DB creds + ADMIN_TOKEN from
+      // server/.env (gitignored). Listens on PORT (default 4000).
+      name: 'recharge-api',
+      script: 'index.js',
+      cwd: './server',
+      interpreter: 'node',
+      env: {
+        NODE_ENV: 'production',
+      },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '256M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    },
   ],
 };
