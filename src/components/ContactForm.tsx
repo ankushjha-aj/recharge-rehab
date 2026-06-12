@@ -29,7 +29,6 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
 
     const serviceLabels: { [key: string]: string } = {
       speech: 'Speech Therapy',
-      occupational: 'Occupational Therapy',
       physical: 'Physical Therapy',
       behavioral: 'Behavioral Therapy',
       other: 'Other Services',
@@ -174,7 +173,6 @@ const ContactForm: React.FC<ContactFormProps> = ({ isModal = false, onClose }) =
               >
                 <option value="">Select a service...</option>
                 <option value="speech">Speech Therapy</option>
-                <option value="occupational">Occupational Therapy</option>
                 <option value="physical">Physical Therapy</option>
                 <option value="behavioral">Behavioral Therapy</option>
                 <option value="other">Other</option>

@@ -446,7 +446,7 @@ const AboutPage: React.FC<AboutPageProps> = ({ onBookConsultation }) => {
                   Specializing in advanced Deglutology (swallow science) and voice disorders, Dr. Upadhyay focuses on reinforcing clinical targets inside a nurturing, home-inspired environment, bridging outpatient clinical care with real-world functional independence.
                 </p>
                 <p>
-                  Dr. Upadhyay coordinates closely with our team of speech therapists, special educators, and occupational therapists to design individual pathways for pediatric, adult, and geriatric rehabilitation. He is committed to training caregivers to build a supportive, 24/7 ecosystem around the clients for long-term functional success.
+                  Dr. Upadhyay coordinates closely with our team of speech therapists, special educators, and behavioural specialists to design individual pathways for pediatric, adult, and geriatric rehabilitation. He is committed to training caregivers to build a supportive, 24/7 ecosystem around the clients for long-term functional success.
                 </p>
               </div>
             </div>

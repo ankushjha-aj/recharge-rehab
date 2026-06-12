@@ -71,6 +71,8 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
     // anchors like "#approach" don't downgrade the highlight to Home.
     if (route.startsWith('/about')) {
       setActiveLabel('About Us');
+    } else if (route.startsWith('/services')) {
+      setActiveLabel('Services');
     } else if (route.startsWith('/gallery')) {
       setActiveLabel('Gallery');
     } else if (route.startsWith('/contact')) {
@@ -124,7 +126,7 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
             <li key={link.label}>
               <a
                 onClick={(e) => {
-                  if (link.label === 'Services' || link.label === 'Blog') {
+                  if (link.label === 'Blog') {
                     e.preventDefault();
                     onWIP?.(link.label);
                   }

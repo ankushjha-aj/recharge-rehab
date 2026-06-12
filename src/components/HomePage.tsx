@@ -115,11 +115,11 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
             {/* Card 2 */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300">
               <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-[20px]">child_care</span>
+                <span className="material-symbols-outlined text-primary text-[20px]">psychology</span>
               </div>
-              <h3 className="text-headline-sm text-on-surface font-bold">Occupational Therapy</h3>
+              <h3 className="text-headline-sm text-on-surface font-bold">Behavioural Therapy</h3>
               <p className="text-body-md text-on-surface-variant leading-relaxed">
-                Developing independence in daily activities, motor skills, and sensory processing.
+                Structured strategies for behavioural and communication challenges, focus, and self-regulation.
               </p>
               <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
                 Learn More
