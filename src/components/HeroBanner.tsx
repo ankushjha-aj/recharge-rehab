@@ -468,7 +468,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
                       <img
                         alt={letter.char}
                         src={letter.src}
-                        className="h-14 sm:h-20 md:h-24 w-auto object-contain"
+                        className="h-14 sm:h-20 md:h-24 w-auto object-contain logo-word-rehabilitation"
                       />
                       {perchBird && flight && (
                         <LogoPerchBird
