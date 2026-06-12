@@ -11,10 +11,13 @@
  * public (the booking page needs them without a passcode).
  */
 import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'recharge2026';
@@ -23,7 +26,8 @@ const PORT = process.env.PORT || 4000;
 const app = express();
 app.use(cors({ origin: true }));
 // The browser sends text/plain (avoids a CORS preflight); accept any type as text.
-app.use(express.text({ type: () => true, limit: '256kb' }));
+// Scoped to the /api route only so it doesn't touch static file requests.
+const textBody = express.text({ type: () => true, limit: '256kb' });
 
 // ---- row <-> API object mappers (snake_case DB <-> camelCase JSON) ----
 const toBooking = (r) => ({
@@ -160,7 +164,7 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.post('/api', async (req, res) => {
+app.post('/api', textBody, async (req, res) => {
   let body;
   try {
     body = typeof req.body === 'string' && req.body ? JSON.parse(req.body) : req.body || {};
@@ -178,4 +182,12 @@ app.post('/api', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Recharge API listening on http://127.0.0.1:${PORT}`));
+// Serve the built frontend (SPA) from the SAME origin as /api. This means the
+// browser only needs ONE open port and there's no CORS — the admin/booking pages
+// call a same-origin /api. Client-side routes (/admin, /book, …) fall back to
+// index.html. Build it first with `npm run build` (creates ../dist).
+const distDir = path.resolve(__dirname, '..', 'dist');
+app.use(express.static(distDir));
+app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+
+app.listen(PORT, () => console.log(`Recharge server (site + API) listening on :${PORT}`));

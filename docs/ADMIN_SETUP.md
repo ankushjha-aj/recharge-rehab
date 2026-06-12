@@ -17,9 +17,9 @@ small Node API. See **"PostgreSQL backend"** below for how it's wired and operat
 |-------|--------|
 | Database | PostgreSQL 16, db `recharge_rehab`, owner role `recharge_app`, port `5432` |
 | Tables | `bookings`, `staff` (10 seeded), `blocked_slots` — see [`server/schema.sql`](../server/schema.sql) |
-| API | Node/Express in [`server/`](../server), PM2 process **`recharge-api`** on port `4000` |
-| Frontend wiring | `VITE_API_ENDPOINT=/api` in `.env`; Vite proxies `/api` → `:4000` in dev |
-| Secrets | DB password + `ADMIN_TOKEN` live in `server/.env` (gitignored, chmod 600) |
+| Server | **One** Node/Express process in [`server/`](../server), PM2 **`recharge-api`**, port **3000** — serves the built site **and** `/api` from the same origin |
+| Frontend wiring | `VITE_API_ENDPOINT=/api` (same origin, no CORS); in dev, Vite proxies `/api` to the API |
+| Secrets | DB password + `ADMIN_TOKEN` live in `server/.env` (gitignored, chmod 600); `PORT` also set there |
 
 ### Operating it
 ```bash
@@ -40,16 +40,27 @@ It must match in **two** places, then restart/rebuild:
 2. `VITE_ADMIN_PASSCODE` in `.env` → `npm run build` (and restart the static serve)
 
 ### Production access (important)
-In dev, Vite proxies `/api` to the API. The static production build (`serve -s dist`)
-does **not** proxy, so pick one:
-- **Recommended — reverse proxy** (same origin, no CORS). With nginx in front:
-  ```nginx
-  location /api/ { proxy_pass http://127.0.0.1:4000/api/; }
-  location /     { try_files $uri /index.html; }   # SPA + static
-  ```
-- **Or absolute URL** — set `VITE_API_ENDPOINT=http://YOUR_SERVER_IP:4000/api` in
-  `.env` and rebuild. CORS is already enabled on the API. (Open port 4000 / use
-  HTTPS as appropriate.)
+The single Node server serves the site **and** `/api` on **port 3000**, so only that
+one port needs to be reachable — no nginx/reverse proxy required.
+
+Open **port 3000 inbound** in *both* firewall layers:
+1. **Local `ufw`** — already allowed (`ufw status` shows `3000/tcp ALLOW`). Add with
+   `ufw allow 3000/tcp` if needed.
+2. **Hetzner Cloud Firewall** — add an inbound TCP rule for **3000** in the Hetzner
+   console. (Port 4000 is no longer used publicly — the API is internal now.)
+
+Rebuild the site after any frontend change so `dist` is fresh, then restart:
+```bash
+npm run build && pm2 restart recharge-api
+```
+
+> Later, for a real domain + HTTPS, put Caddy/nginx in front on 80/443 and proxy to
+> `:3000` — no app changes needed.
+
+### Dev workflow
+`npm run dev` runs Vite on 3000 and proxies `/api`. Since the prod server also uses
+3000, for local dev run the API on another port first, e.g.
+`PORT=4000 node server/index.js`, and point the Vite proxy target at it.
 
 ### Restart-safety
 `pm2 save` has been run so the API comes back with `pm2 resurrect`. To start PM2 on

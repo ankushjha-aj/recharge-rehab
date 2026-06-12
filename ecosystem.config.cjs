@@ -1,24 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: 'recharge-rehab',
-      script: 'serve',
-      args: '-s dist -l 3000 --no-clipboard',
-      interpreter: 'none',
-      env: {
-        NODE_ENV: 'production',
-        PM2_SERVE_PATH: './dist',
-        PM2_SERVE_PORT: 5173,
-        PM2_SERVE_SPA: 'true',
-      },
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '512M',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-    },
-    {
-      // Postgres-backed booking/admin API. Reads its DB creds + ADMIN_TOKEN from
-      // server/.env (gitignored). Listens on PORT (default 4000).
+      // Single unified server: serves the built site (../dist) AND the /api,
+      // both on the same origin/port, backed by Postgres. Reads DB creds +
+      // ADMIN_TOKEN + PORT from server/.env (gitignored). PORT is 3000 in prod.
       name: 'recharge-api',
       script: 'index.js',
       cwd: './server',
@@ -28,7 +13,7 @@ module.exports = {
       },
       autorestart: true,
       watch: false,
-      max_memory_restart: '256M',
+      max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     },
   ],
