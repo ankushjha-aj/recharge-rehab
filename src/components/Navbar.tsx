@@ -5,6 +5,7 @@ const navLinks = [
   { label: 'Home', href: '/' },
   { label: 'About Us', href: '/about' },
   { label: 'Services', href: '/services' },
+  { label: 'Book Session', href: '/book' },
   { label: 'Gallery', href: '/gallery' },
   { label: 'Blog', href: '/blog' },
   { label: 'Contact Us', href: '/contact' },
@@ -73,6 +74,8 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
       setActiveLabel('About Us');
     } else if (route.startsWith('/services')) {
       setActiveLabel('Services');
+    } else if (route.startsWith('/book')) {
+      setActiveLabel('Book Session');
     } else if (route.startsWith('/gallery')) {
       setActiveLabel('Gallery');
     } else if (route.startsWith('/contact')) {

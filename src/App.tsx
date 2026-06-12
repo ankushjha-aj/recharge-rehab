@@ -8,6 +8,7 @@ import HomePage from './components/HomePage';
 import ContactPage from './components/ContactPage';
 import GalleryPage from './components/GalleryPage';
 import ServicesPage from './components/ServicesPage';
+import BookingPage from './components/BookingPage';
 
 // Path routes start with "/" so in-page anchors (e.g. "#approach") are ignored.
 const getRoute = () => {
@@ -16,6 +17,7 @@ const getRoute = () => {
   if (path.startsWith('/contact')) return '/contact';
   if (path.startsWith('/gallery')) return '/gallery';
   if (path.startsWith('/services')) return '/services';
+  if (path.startsWith('/book')) return '/book';
   return '/';
 };
 
@@ -78,6 +80,8 @@ function App() {
         <GalleryPage onBookConsultation={openModal} />
       ) : route === '/services' ? (
         <ServicesPage onBookConsultation={openModal} />
+      ) : route === '/book' ? (
+        <BookingPage onBookConsultation={openModal} />
       ) : (
         <HomePage onBookConsultation={openModal} />
       )}
