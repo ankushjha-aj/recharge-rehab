@@ -177,9 +177,10 @@ interface HeroBannerProps {
   onComplete?: () => void;
   mode?: 'home' | 'contact' | 'backdrop';
   onBookConsultation?: () => void;
+  typingState?: 'username' | 'password' | 'none';
 }
 
-const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBookConsultation }) => {
+const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBookConsultation, typingState = 'none' }) => {
   const [animState, setAnimState] = useState<'idle' | 'walking' | 'knocking' | 'welcoming' | 'entering' | 'inside'>('idle');
   const [doorState, setDoorState] = useState<'closed' | 'open' | 'closing'>('closed');
   const [showRipple, setShowRipple] = useState(false);
@@ -468,7 +469,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
                       <img
                         alt={letter.char}
                         src={letter.src}
-                        className="h-14 sm:h-20 md:h-24 w-auto object-contain logo-word-rehabilitation"
+                        className="h-14 sm:h-20 md:h-24 w-auto object-contain logo-word-rehabilitation logo-letter-3d cursor-pointer"
                       />
                       {perchBird && flight && (
                         <LogoPerchBird
@@ -631,6 +632,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
                   playState={playState}
                   clothingColors={clothingColors}
                   staffStepsOut={staffStepsOut}
+                  typingState={typingState}
                 />
               </div>
 
@@ -684,31 +686,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ onComplete, mode = 'home', onBo
                   </g>
 
 
-                  {/* Front White Picket Fence & Gate columns */}
-                  {/* Left fence panel */}
-                  <line x1="20" y1="220" x2="480" y2="220" stroke="#F8FAFC" strokeWidth="4" />
-                  <line x1="20" y1="285" x2="480" y2="285" stroke="#F8FAFC" strokeWidth="4" />
-                  {Array.from({ length: 23 }).map((_, i) => (
-                    <line key={i} x1={30 + i * 20} y1="200" x2={30 + i * 20} y2="290" stroke="#F8FAFC" strokeWidth="3" />
-                  ))}
 
-                  {/* Left Gate Column */}
-                  <rect x="475" y="165" width="10" height="125" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="2" />
-                  <circle cx="480" cy="159" r="6" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
-
-                  {/* Closed Left Gate Panel with Sign */}
-                  <rect x="488" y="180" width="55" height="110" fill="none" stroke="#F8FAFC" strokeWidth="4" />
-                  <rect x="492" y="210" width="46" height="30" rx="3" fill="#F8FAFC" stroke="#CBD5E1" strokeWidth="2" />
-                  {/* Yellow Lightning Bolt (Logo detail) */}
-                  <polygon points="517,215 510,225 517,225 513,235 522,223 515,223" fill="#E4C15B" />
-
-                  {/* Right Gate Column */}
-                  <rect x="635" y="165" width="10" height="125" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="2" />
-                  <circle cx="640" cy="159" r="6" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
-
-                  {/* Open Right Gate Panel (Rotated in perspective) */}
-                  <line x1="645" y1="180" x2="665" y2="190" stroke="#F8FAFC" strokeWidth="4" />
-                  <line x1="645" y1="290" x2="665" y2="295" stroke="#F8FAFC" strokeWidth="4" />
                 </g>
 
                 {/* Letter birds resting on the building (roof ridge, ledges, sills) */}

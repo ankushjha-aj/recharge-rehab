@@ -1384,3 +1384,46 @@ textarea:focus {
 .animate-home-slide-in {
   animation: homeSlideInFromLeft 1.2s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
+
+/* Interactive 3D hover effect for bouncing logo letters */
+.logo-letter-3d {
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.3s ease;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+.logo-letter-3d:hover {
+  transform: translateY(-6px) rotateX(12deg) rotateY(12deg) scale(1.18) translateZ(10px);
+  filter: drop-shadow(0 10px 12px rgba(7, 95, 171, 0.25));
+}
+.dark .logo-letter-3d:hover {
+  filter: drop-shadow(0 10px 12px rgba(164, 201, 255, 0.45));
+}
+
+/* Animated gradient border flow keyframes */
+@keyframes gradientBorderFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.gradient-border-wrapper {
+  position: relative;
+  border-radius: 1rem; /* rounded-2xl */
+  padding: 1px; /* border thickness */
+  background: rgb(var(--color-outline-variant) / 0.8);
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.gradient-border-wrapper:focus-within {
+  background: linear-gradient(90deg, #3B82F6, #8B5CF6, #0EA5E9, #3B82F6);
+  background-size: 300% 300%;
+  animation: gradientBorderFlow 3s ease infinite;
+  box-shadow: 0 4px 20px -2px rgba(59, 130, 246, 0.3), 0 0 12px 1px rgba(139, 92, 246, 0.15);
+  transform: translateY(-2px);
+}

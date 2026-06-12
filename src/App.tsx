@@ -15,6 +15,7 @@ import AdminPage from './components/AdminPage';
 const getRoute = () => {
   const path = window.location.pathname;
   if (path.startsWith('/admin')) return '/admin';
+  if (path.startsWith('/employee')) return '/employee';
   if (path.startsWith('/about')) return '/about';
   if (path.startsWith('/contact')) return '/contact';
   if (path.startsWith('/gallery')) return '/gallery';
@@ -67,8 +68,8 @@ function App() {
     setIsWIPOpen(true);
   };
 
-  // Admin is a standalone, passcode-gated screen — no public navbar/footer/FAB.
-  if (route === '/admin') {
+  // Admin & Employee are standalone, passcode-gated screens — no public navbar/footer/FAB.
+  if (route === '/admin' || route === '/employee') {
     return (
       <div className="bg-background text-on-surface flex flex-col min-h-screen">
         <AdminPage />

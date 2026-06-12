@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -131,23 +131,12 @@ const archShape = (radius: number, drop: number) => {
 const extrudeArch = (radius: number, drop: number, depth: number) =>
   new THREE.ExtrudeGeometry(archShape(radius, drop), { depth, bevelEnabled: false });
 
-const glassMaterial = (
-  <meshStandardMaterial
-    color="#1E293B"
-    roughness={0.55}
-    metalness={0.1}
-    emissive="#FDE68A"
-    emissiveIntensity={0.14}
-  />
-);
+type Window3DProps = { cx: number; cy: number; w: number; h: number; material: THREE.MeshStandardMaterial };
 
-type Window3DProps = { cx: number; cy: number; w: number; h: number };
-
-const Window3D: React.FC<Window3DProps> = ({ cx, cy, w, h }) => (
+const Window3D: React.FC<Window3DProps> = ({ cx, cy, w, h, material }) => (
   <group position={[cx - 500, 161 - cy, 120]}>
-    <mesh position={[0, 0, 0.8]}>
+    <mesh position={[0, 0, 0.8]} material={material}>
       <boxGeometry args={[w, h, 2]} />
-      {glassMaterial}
     </mesh>
     {/* Frame borders - Slate 50 off-white */}
     <mesh position={[0, h / 2 + 2, 1.2]} castShadow>
@@ -311,22 +300,46 @@ const Bird3D: React.FC<{
   delay: number;
   scale?: number;
   mirrored?: boolean;
-}> = ({ cx, cy, wz, bodyColor, wingColor, delay, scale = 1.0, mirrored = false }) => {
+  isTyping?: boolean;
+}> = ({ cx, cy, wz, bodyColor, wingColor, delay, scale = 1.0, mirrored = false, isTyping = false }) => {
   const groupRef = useRef<THREE.Group>(null);
+  const wingMeshRef = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
-    const t = (clock.getElapsedTime() + delay) % 8;
-    // Chirp/shake
+    const time = clock.getElapsedTime();
+    const t = (time + delay) % 8;
+    // Chirp/shake/hop
     let rz = 0;
-    if (t > 0.8 && t < 1.6) {
-      rz = Math.sin((t - 0.8) * Math.PI * 4) * 0.15;
+    if (isTyping) {
+      rz = Math.sin(time * 25) * 0.15;
+      groupRef.current.position.y = (161 - cy) + Math.abs(Math.sin(time * 15)) * 1.5;
+    } else {
+      if (t > 0.8 && t < 1.6) {
+        rz = Math.sin((t - 0.8) * Math.PI * 4) * 0.15;
+      }
+      groupRef.current.position.y = 161 - cy;
     }
     groupRef.current.rotation.z = rz;
+
     // Turn around
-    if (t > 4 && t < 4.2) {
-      groupRef.current.scale.x = (mirrored ? 1 : -1) * scale;
+    if (!isTyping) {
+      if (t > 4 && t < 4.2) {
+        groupRef.current.scale.x = (mirrored ? 1 : -1) * scale;
+      } else {
+        groupRef.current.scale.x = (mirrored ? -1 : 1) * scale;
+      }
     } else {
-      groupRef.current.scale.x = (mirrored ? -1 : 1) * scale;
+      const lookTime = Math.floor(time * 2) % 4;
+      groupRef.current.scale.x = (lookTime < 2 ? 1 : -1) * scale * (mirrored ? -1 : 1);
+    }
+
+    // Flapping wings when typing
+    if (wingMeshRef.current) {
+      if (isTyping) {
+        wingMeshRef.current.rotation.z = Math.sin(time * 30) * 0.8;
+      } else {
+        wingMeshRef.current.rotation.z = 0;
+      }
     }
   });
 
@@ -344,7 +357,7 @@ const Bird3D: React.FC<{
         <coneGeometry args={[0.7, 2, 4]} />
         <meshStandardMaterial color="#F59E0B" roughness={0.5} />
       </mesh>
-      <mesh position={[1.5, 0.5, 1.8]} rotation={[0.2, -0.2, -0.1]} castShadow>
+      <mesh ref={wingMeshRef} position={[1.5, 0.5, 1.8]} rotation={[0.2, -0.2, -0.1]} castShadow>
         <boxGeometry args={[4, 1.5, 0.5]} />
         <meshStandardMaterial color={wingColor} roughness={0.7} />
       </mesh>
@@ -522,13 +535,38 @@ const HouseModel: React.FC<{
   playState: string;
   clothingColors: { parent: string; child: string; playChild: string };
   staffStepsOut: boolean;
-}> = ({ doorState, animState, playState, clothingColors, staffStepsOut }) => {
+  typingState?: 'username' | 'password' | 'none';
+}> = ({ doorState, animState, playState, clothingColors, staffStepsOut, typingState = 'none' }) => {
   const brickTexture = useMemo(makeBrickTexture, []);
   const roofGeo = useMemo(() => makeFrustumGeometry(510, 260, 410, 160, 28), []);
   const surroundGeo = useMemo(() => extrudeArch(29, 123, 1.2), []); // Extended down to 123
   const interiorGeo = useMemo(() => extrudeArch(25, 120, 1.2), []); // Extended down to 120
   const archFrameGeo = useMemo(() => extrudeArch(28, 25, 2.5), []);
   const archGlassGeo = useMemo(() => extrudeArch(25, 22, 2), []);
+
+  // Shared responsive standard materials
+  const gfMaterial = useMemo(() => new THREE.MeshStandardMaterial({
+    color: new THREE.Color("#1E293B"),
+    roughness: 0.55,
+    metalness: 0.1,
+    emissive: new THREE.Color("#FDE68A"),
+    emissiveIntensity: 0.14
+  }), []);
+
+  const ufMaterial = useMemo(() => new THREE.MeshStandardMaterial({
+    color: new THREE.Color("#1E293B"),
+    roughness: 0.55,
+    metalness: 0.1,
+    emissive: new THREE.Color("#FDE68A"),
+    emissiveIntensity: 0.14
+  }), []);
+
+  useEffect(() => {
+    return () => {
+      gfMaterial.dispose();
+      ufMaterial.dispose();
+    };
+  }, [gfMaterial, ufMaterial]);
 
   // Character and Dog refs
   const ParentMesh = useRef<THREE.Group>(null);
@@ -558,12 +596,18 @@ const HouseModel: React.FC<{
     });
   };
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const time = clock.getElapsedTime();
     if (animState !== lastAnimState.current) {
       lastAnimState.current = animState;
       animStartTime.current = time;
     }
+
+    // Responsive pulsing window glow animation on typing focus
+    const targetGf = typingState === 'username' ? 0.8 + Math.sin(time * 12) * 0.25 : 0.14;
+    const targetUf = typingState === 'password' ? 0.8 + Math.sin(time * 12) * 0.25 : 0.14;
+    gfMaterial.emissiveIntensity = THREE.MathUtils.damp(gfMaterial.emissiveIntensity, targetGf, 6, delta);
+    ufMaterial.emissiveIntensity = THREE.MathUtils.damp(ufMaterial.emissiveIntensity, targetUf, 6, delta);
     if (playState !== lastPlayState.current) {
       lastPlayState.current = playState;
       playStartTime.current = time;
@@ -826,18 +870,16 @@ const HouseModel: React.FC<{
       </mesh>
 
       {/* Second floor windows */}
-      <Window3D cx={312.5} cy={92.5} w={45} h={35} />
-      <Window3D cx={382.5} cy={92.5} w={45} h={35} />
-      <Window3D cx={462.5} cy={92.5} w={45} h={35} />
+      <Window3D cx={312.5} cy={92.5} w={45} h={35} material={ufMaterial} />
+      <Window3D cx={382.5} cy={92.5} w={45} h={35} material={ufMaterial} />
+      <Window3D cx={462.5} cy={92.5} w={45} h={35} material={ufMaterial} />
 
       {/* Arched window (right top) - Slate 50 borders */}
       <group position={[55, 73, 120]}>
         <mesh geometry={archFrameGeo} castShadow>
           <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
         </mesh>
-        <mesh geometry={archGlassGeo} position={[0, 0, 1.2]}>
-          {glassMaterial}
-        </mesh>
+        <mesh geometry={archGlassGeo} position={[0, 0, 1.2]} material={ufMaterial} />
         <mesh position={[0, -1, 3.4]}>
           <boxGeometry args={[1.6, 44, 1.2]} />
           <meshStandardMaterial color="#F8FAFC" roughness={0.7} emissive="#F8FAFC" emissiveIntensity={0.15} />
@@ -845,8 +887,8 @@ const HouseModel: React.FC<{
       </group>
 
       {/* Ground floor windows */}
-      <Window3D cx={330} cy={222.5} w={60} h={65} />
-      <Window3D cx={420} cy={222.5} w={60} h={65} />
+      <Window3D cx={330} cy={222.5} w={60} h={65} material={gfMaterial} />
+      <Window3D cx={420} cy={222.5} w={60} h={65} material={gfMaterial} />
 
       {/* Main entrance: Slate 50 surround, warm-lit interior, sliding door */}
       <group position={[85, -29, 120]}>
@@ -880,10 +922,10 @@ const HouseModel: React.FC<{
         <FoliageSphere cx={70} cy={135} r={28} color="#14532D" wz={0} />
         <FoliageSphere cx={70} cy={90} r={15} color="#86EFAC" wz={8} />
 
-        <Bird3D cx={60} cy={95} wz={22} bodyColor="#3B82F6" wingColor="#1D4ED8" delay={0} />
-        <Bird3D cx={85} cy={105} wz={-12} bodyColor="#10B981" wingColor="#047857" delay={1.5} mirrored />
-        <Bird3D cx={42} cy={128} wz={14} bodyColor="#F59E0B" wingColor="#B45309" delay={2.6} scale={0.9} />
-        <Bird3D cx={101} cy={126} wz={-17} bodyColor="#EF4444" wingColor="#B91C1C" delay={3.4} scale={0.9} mirrored />
+        <Bird3D cx={60} cy={95} wz={22} bodyColor="#3B82F6" wingColor="#1D4ED8" delay={0} isTyping={typingState !== 'none'} />
+        <Bird3D cx={85} cy={105} wz={-12} bodyColor="#10B981" wingColor="#047857" delay={1.5} mirrored isTyping={typingState !== 'none'} />
+        <Bird3D cx={42} cy={128} wz={14} bodyColor="#F59E0B" wingColor="#B45309" delay={2.6} scale={0.9} isTyping={typingState !== 'none'} />
+        <Bird3D cx={101} cy={126} wz={-17} bodyColor="#EF4444" wingColor="#B91C1C" delay={3.4} scale={0.9} mirrored isTyping={typingState !== 'none'} />
       </Tree3D>
 
       {/* 3. Small Left Tree (in place of the bench) */}
@@ -910,8 +952,8 @@ const HouseModel: React.FC<{
         <FoliageSphere cx={760} cy={193} r={13} color="#8BC66B" wz={15} />
         <FoliageSphere cx={779} cy={194} r={14} color="#3E7D32" wz={-10} />
 
-        <Bird3D cx={765} cy={194} wz={17} bodyColor="#8B5CF6" wingColor="#6D28D9" delay={0.8} scale={0.85} />
-        <Bird3D cx={787} cy={218} wz={-8} bodyColor="#0EA5E9" wingColor="#0369A1" delay={2.2} scale={0.78} mirrored />
+        <Bird3D cx={765} cy={194} wz={17} bodyColor="#8B5CF6" wingColor="#6D28D9" delay={0.8} scale={0.85} isTyping={typingState !== 'none'} />
+        <Bird3D cx={787} cy={218} wz={-8} bodyColor="#0EA5E9" wingColor="#0369A1" delay={2.2} scale={0.78} mirrored isTyping={typingState !== 'none'} />
       </Tree3D>
 
       {/* --- 3D Characters Group --- */}
@@ -976,6 +1018,7 @@ type House3DProps = {
   playState: string;
   clothingColors: { parent: string; child: string; playChild: string };
   staffStepsOut: boolean;
+  typingState?: 'username' | 'password' | 'none';
 };
 
 const House3D: React.FC<House3DProps> = ({
@@ -986,6 +1029,7 @@ const House3D: React.FC<House3DProps> = ({
   playState,
   clothingColors,
   staffStepsOut,
+  typingState = 'none',
 }) => (
   <Canvas
     flat
@@ -1019,6 +1063,7 @@ const House3D: React.FC<House3DProps> = ({
         playState={playState}
         clothingColors={clothingColors}
         staffStepsOut={staffStepsOut}
+        typingState={typingState}
       />
     </TiltGroup>
     {/* Soft contact shadow on the ground; stays put while the house tilts */}

@@ -47,6 +47,14 @@ const lettersData = [
   { id: 7, char: 'e', src: '/images/logo_parts/letter_7_e.png' },
 ];
 
+const CLINIC_TAGLINES = [
+  "Every voice deserves to be heard.",
+  "Recharging confidence, one step at a time.",
+  "Evidence-based care for sound communication.",
+  "Restoring speech, language, and independence.",
+  "Empowering communication, behavioral, and academic growth."
+];
+
 const FlyingBird: React.FC<{
   direction: 'ltr' | 'rtl';
   top: string;
@@ -136,14 +144,19 @@ const AdminPage: React.FC = () => {
   const [user, setUser] = useState<User | null>(getCurrentUser());
   const [checking, setChecking] = useState(true);
 
+  const path = window.location.pathname;
+  const isEmployeePath = path.startsWith('/employee');
+
   useEffect(() => {
-    document.title = 'Admin - Recharge Rehabilitation';
+    document.title = isEmployeePath
+      ? 'Employee Portal - Recharge Rehabilitation'
+      : 'Admin - Recharge Rehabilitation';
     refreshMe().then((u) => {
       if (u) setUser(u);
       else setUser(null);
       setChecking(false);
     });
-  }, []);
+  }, [isEmployeePath]);
 
   const handleLogout = async () => {
     await logout();
@@ -153,7 +166,7 @@ const AdminPage: React.FC = () => {
   if (checking && !user) {
     return <div className="flex-grow bg-background grid place-items-center text-on-surface-variant">Loading…</div>;
   }
-  if (!user) return <LoginForm onLoggedIn={setUser} />;
+  if (!user) return <LoginForm onLoggedIn={setUser} isEmployeePath={isEmployeePath} />;
   if (user.role === 'employee') return <EmployeeDashboard user={user} onLogout={handleLogout} />;
   return <AdminDashboard user={user} onLogout={handleLogout} />;
 };
@@ -161,7 +174,7 @@ const AdminPage: React.FC = () => {
 // ===========================================================================
 // Login (shared by all roles)
 // ===========================================================================
-const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) => {
+const LoginForm: React.FC<{ onLoggedIn: (u: User) => void; isEmployeePath: boolean }> = ({ onLoggedIn, isEmployeePath }) => {
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -169,13 +182,76 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Default portal mode: locked to employee if on /employee, otherwise starts at null on /admin
+  const [portalMode, setPortalMode] = useState<'admin' | 'employee' | null>(isEmployeePath ? 'employee' : null);
+
+  // Clinic taglines carousel state
+  const [activeTaglineIdx, setActiveTaglineIdx] = useState(0);
+  const [fadeTagline, setFadeTagline] = useState(true);
+
+  // Option 2 (3D Card Tilt) state
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  // Option 4 (Typing responsiveness tracking) state
+  const [typingState, setTypingState] = useState<'username' | 'password' | 'none'>('none');
+
+  // Option 1 (Dynamic greeting calculation based on hour)
+  const systemHour = useMemo(() => new Date().getHours(), []);
+  const greetingData = useMemo(() => {
+    if (portalMode === null) return null;
+    const roleName = portalMode === 'admin' ? 'Admin' : 'Therapist';
+    if (systemHour >= 5 && systemHour < 12) {
+      return { text: `Good morning, ${roleName}`, icon: 'wb_sunny', colorClass: 'text-amber-500' };
+    } else if (systemHour >= 12 && systemHour < 17) {
+      return { text: `Good afternoon, ${roleName}`, icon: 'sunny', colorClass: 'text-orange-500' };
+    } else if (systemHour >= 17 && systemHour < 22) {
+      return { text: `Good evening, ${roleName}`, icon: 'brightness_4', colorClass: 'text-indigo-400' };
+    } else {
+      return { text: `Good night, ${roleName}`, icon: 'nights_stay', colorClass: 'text-sky-300' };
+    }
+  }, [portalMode, systemHour]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFadeTagline(false);
+      setTimeout(() => {
+        setActiveTaglineIdx((idx) => (idx + 1) % CLINIC_TAGLINES.length);
+        setFadeTagline(true);
+      }, 300);
+    }, 4500);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handlePop = () => {
+      const isEmp = window.location.pathname.startsWith('/employee');
+      setPortalMode(isEmp ? 'employee' : null);
+    };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr('');
     try {
       localStorage.setItem('rr_remember', remember ? '1' : '0');
-      onLoggedIn(await login(id.trim(), pw));
+      const u = await login(id.trim(), pw);
+
+      // Security role validation
+      if (portalMode === 'employee' && u.role !== 'employee') {
+        await logout();
+        setErr('Access Denied: This portal is only for employees.');
+        return;
+      }
+      if (portalMode === 'admin' && u.role === 'employee') {
+        await logout();
+        setErr('Access Denied: Employees must login via the Employee Portal (/employee).');
+        return;
+      }
+
+      onLoggedIn(u);
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : 'Login failed');
     } finally {
@@ -183,13 +259,30 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
     }
   };
 
+  const handleCardPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const card = e.currentTarget;
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    // Calculate tilt angles (maximum 8 degrees tilt)
+    const rotateY = ((x - centerX) / centerX) * 8;
+    const rotateX = -((y - centerY) / centerY) * 8;
+    setTilt({ x: rotateX, y: rotateY });
+  };
+
+  const handleCardPointerLeave = () => {
+    setTilt({ x: 0, y: 0 });
+  };
+
   const fieldCls =
-    'w-full bg-surface-container-lowest/60 border border-outline-variant rounded-2xl py-3.5 pl-11 pr-4 text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-200';
+    'w-full bg-transparent border-0 rounded-2xl py-3.5 pl-11 pr-4 text-body-md text-on-surface outline-none transition-all duration-200';
 
   const bgStyle = {
     backgroundImage: `
-      radial-gradient(circle at 0% 0%, rgb(var(--color-primary-fixed) / 0.5) 0%, transparent 45%),
-      radial-gradient(circle at 100% 100%, rgb(var(--color-footer-dark) / 0.45) 0%, transparent 45%)
+      radial-gradient(circle at 0% 0%, rgb(var(--color-footer-dark) / 0.7) 0%, transparent 30%),
+      radial-gradient(circle at 100% 100%, rgb(var(--color-footer-dark) / 0.65) 0%, transparent 30%)
     `
   };
 
@@ -250,144 +343,290 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void }> = ({ onLoggedIn }) 
 
         {/* ─── Left: animated house scene + logo letters ─── */}
         <div className="relative flex flex-col justify-between items-center md:items-start p-8 md:p-12 overflow-hidden md:min-h-screen">
-          {/* Top: RECHARGE Logo letters bouncing in */}
-          <div className="relative z-20 flex items-center h-12 md:h-16 overflow-visible mb-6 mt-12 md:mt-0">
-            {lettersData.map((letter, index) => (
-              <div
-                key={letter.id}
-                className="relative flex items-center h-full animate-logo-letter-bounce"
-                style={{
-                  animationDelay: `${1200 + index * 115}ms`,
-                  animationFillMode: 'both',
-                }}
-              >
-                <img
-                  alt={letter.char}
-                  src={letter.src}
-                  className="h-10 md:h-14 w-auto object-contain logo-word-rehabilitation"
-                />
-              </div>
-            ))}
+          {/* Top: Brand letters & wordmark */}
+          <div className="relative z-20 flex flex-col items-center md:items-start mb-6 mt-12 md:mt-0 gap-1.5 md:gap-2">
+            {/* RECHARGE Letters */}
+            <div className="flex items-center h-12 md:h-16 overflow-visible">
+              {lettersData.map((letter, index) => (
+                <div
+                  key={letter.id}
+                  className="relative flex items-center h-full animate-logo-letter-bounce"
+                  style={{
+                    animationDelay: `${1200 + index * 115}ms`,
+                    animationFillMode: 'both',
+                  }}
+                >
+                  <img
+                    alt={letter.char}
+                    src={letter.src}
+                    className="h-10 md:h-14 w-auto object-contain logo-word-rehabilitation logo-letter-3d cursor-pointer"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* REHABILITATION wordmark */}
+            <div className="animate-fade-in pl-1 md:pl-2" style={{ animationDelay: '2.1s', animationFillMode: 'both' }}>
+              <img
+                src="/images/logo-half.png"
+                alt="Rehabilitation"
+                className="h-6 md:h-8 w-auto object-contain logo-word-rehabilitation select-none"
+              />
+            </div>
           </div>
 
           {/* Center: Animated House Scene background */}
           <div className="w-full flex-grow flex items-center justify-center select-none z-10">
-            <HeroBanner mode="backdrop" />
+            <HeroBanner mode="backdrop" typingState={typingState} />
           </div>
 
           {/* Bottom: Tagline overlaid on the scene */}
-          <div className="relative z-20 text-center md:text-left mt-8 md:mt-0 animate-fade-in" style={{ animationDelay: '1.2s', animationFillMode: 'both' }}>
+          <div className="relative z-20 text-center md:text-left mt-8 md:mt-0 animate-fade-in flex flex-col items-center md:items-start w-full" style={{ animationDelay: '1.2s', animationFillMode: 'both' }}>
             <p className="text-headline-sm md:text-headline-md font-extrabold text-on-surface leading-snug max-w-xs">
               Discharged from the hospital&nbsp;—
             </p>
             <p className="text-headline-sm md:text-headline-md font-extrabold text-primary leading-snug max-w-xs">
               recharge with us.
             </p>
+
+            {/* Glassmorphic Clinic Tagline Carousel */}
+            <div className="w-full max-w-xs mt-6">
+              <div className="bg-surface-container-lowest/30 backdrop-blur-md border border-outline-variant/30 rounded-2xl p-4 shadow-md flex items-start gap-3 select-none">
+                <div className="w-8 h-8 rounded-xl bg-primary-fixed grid place-items-center text-primary shrink-0">
+                  <span className="material-symbols-outlined text-[18px]">record_voice_over</span>
+                </div>
+                <div className="flex-grow min-h-[44px] flex items-center">
+                  <p className={`text-body-sm font-medium text-on-surface-variant leading-relaxed text-left transition-opacity duration-300 ${fadeTagline ? 'opacity-100' : 'opacity-0'}`}>
+                    {CLINIC_TAGLINES[activeTaglineIdx]}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ─── Right: sign-in form ─── */}
+        {/* ─── Right: sign-in form or portal selector ─── */}
         <div className="relative flex items-center justify-center px-6 py-12 md:py-0">
-          <div className="relative z-10 w-full max-w-md bg-surface-container-lowest/40 backdrop-blur-xl border border-outline-variant/30 p-8 rounded-3xl shadow-2xl animate-fade-in-up" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
-            {/* Brand mark with glow ring */}
-            <div className="relative w-14 h-14 mb-6">
-              <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
-              <div className="relative w-14 h-14 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
-                <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
-              </div>
-            </div>
+          <div
+            onPointerMove={handleCardPointerMove}
+            onPointerLeave={handleCardPointerLeave}
+            className="relative z-10 w-full max-w-md bg-surface-container-lowest/40 backdrop-blur-xl border border-outline-variant/30 p-8 rounded-3xl shadow-2xl animate-fade-in-up"
+            style={{
+              animationDelay: '0.4s',
+              animationFillMode: 'both',
+              transform: `perspective(1000px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
+              transition: tilt.x === 0 && tilt.y === 0 ? 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1)' : 'none',
+              transformStyle: 'preserve-3d',
+            }}
+          >
+            
+            {portalMode === null ? (
+              <>
+                {/* Brand mark with glow ring */}
+                <div className="relative w-14 h-14 mb-6 mx-auto md:mx-0">
+                  <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
+                  <div className="relative w-14 h-14 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
+                    <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
+                  </div>
+                </div>
 
-            <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs">Recharge Rehabilitation</p>
-            <h1 className="text-headline-lg font-extrabold text-on-surface mb-1.5">Welcome back</h1>
-            <p className="text-body-md text-on-surface-variant mb-8">Sign in to manage bookings, availability and your team.</p>
+                <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs text-center md:text-left">Recharge Rehabilitation</p>
+                <h1 className="text-headline-lg font-extrabold text-on-surface mb-1.5 text-center md:text-left">Select Portal</h1>
+                <p className="text-body-md text-on-surface-variant mb-8 text-center md:text-left">Choose your access level to sign in.</p>
 
-            <form onSubmit={submit} className="space-y-4">
-              {/* Login ID */}
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">person</span>
-                <input
-                  value={id}
-                  onChange={(e) => setId(e.target.value)}
-                  placeholder="Login ID"
-                  autoFocus
-                  autoCapitalize="none"
-                  autoComplete="username"
-                  className={fieldCls}
-                />
-              </div>
+                <div className="space-y-4">
+                  <button
+                    type="button"
+                    onClick={() => setPortalMode('admin')}
+                    className="w-full text-left bg-surface-container-lowest/60 hover:bg-surface-container-lowest active:scale-[0.99] border border-outline-variant/60 hover:border-primary/50 hover:shadow-lg rounded-[1.5rem] p-5 transition-all duration-300 group flex items-center gap-4 cursor-pointer"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-primary-fixed grid place-items-center text-primary group-hover:scale-110 transition-transform duration-300">
+                      <span className="material-symbols-outlined text-[26px]">admin_panel_settings</span>
+                    </div>
+                    <div>
+                      <h3 className="text-headline-sm font-bold text-on-surface group-hover:text-primary transition-colors">Admin Portal</h3>
+                      <p className="text-body-sm text-on-surface-variant/80">Clinic configuration &amp; system settings</p>
+                    </div>
+                  </button>
 
-              {/* Password */}
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">lock</span>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  value={pw}
-                  onChange={(e) => setPw(e.target.value)}
-                  placeholder="Password"
-                  autoComplete="current-password"
-                  className={`${fieldCls} pr-11`}
-                />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.history.pushState({}, '', '/employee');
+                      window.dispatchEvent(new PopStateEvent('popstate'));
+                      setPortalMode('employee');
+                    }}
+                    className="w-full text-left bg-surface-container-lowest/60 hover:bg-surface-container-lowest active:scale-[0.99] border border-outline-variant/60 hover:border-primary/50 hover:shadow-lg rounded-[1.5rem] p-5 transition-all duration-300 group flex items-center gap-4 cursor-pointer"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-tertiary-fixed grid place-items-center text-primary group-hover:scale-110 transition-transform duration-300">
+                      <span className="material-symbols-outlined text-[26px]">groups</span>
+                    </div>
+                    <div>
+                      <h3 className="text-headline-sm font-bold text-on-surface group-hover:text-primary transition-colors">Employee Portal</h3>
+                      <p className="text-body-sm text-on-surface-variant/80">Therapist schedules &amp; client sessions</p>
+                    </div>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Back to portals button */}
                 <button
                   type="button"
-                  onClick={() => setShowPw((s) => !s)}
-                  title={showPw ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 grid place-items-center rounded-full text-on-surface-variant hover:text-primary transition-colors"
+                  onClick={() => {
+                    window.history.pushState({}, '', '/admin');
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                    setPortalMode(null);
+                  }}
+                  className="mb-4 flex items-center gap-1.5 text-body-sm text-on-surface-variant/70 hover:text-primary transition-colors cursor-pointer group"
                 >
-                  <span className="material-symbols-outlined text-[20px]">{showPw ? 'visibility_off' : 'visibility'}</span>
+                  <span className="material-symbols-outlined text-[16px] group-hover:-translate-x-1 transition-transform">arrow_back</span>
+                  Back to portals
                 </button>
-              </div>
 
-              {/* Keep me signed in */}
-              <label className="flex items-center gap-2.5 cursor-pointer select-none group">
-                <span
-                  onClick={() => setRemember((r) => !r)}
-                  className={`inline-flex items-center justify-center w-5 h-5 rounded-md border-2 transition-all duration-200 ${
-                    remember
-                      ? 'bg-primary border-primary text-on-primary'
-                      : 'border-outline-variant text-transparent group-hover:border-primary/60'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[16px]">check</span>
-                </span>
-                <span className="text-body-sm text-on-surface-variant">Keep me signed in on this device</span>
-              </label>
+                {/* Brand mark with glow ring */}
+                <div className="relative w-14 h-14 mb-6">
+                  <span className="absolute inset-0 rounded-2xl bg-primary/25 blur-xl animate-pulse-ring" />
+                  <div className="relative w-14 h-14 rounded-2xl bg-primary-fixed grid place-items-center text-primary shadow-sm">
+                    <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      {portalMode === 'admin' ? 'admin_panel_settings' : 'groups'}
+                    </span>
+                  </div>
+                </div>
 
-              {err && (
-                <p className="flex items-center gap-1.5 text-body-sm text-[#B42318]">
-                  <span className="material-symbols-outlined text-[18px]">error</span>
-                  {err}
+                <p className="text-label-md uppercase tracking-[0.2em] text-primary font-extrabold mb-1 text-xs">Recharge Rehabilitation</p>
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  {greetingData && (
+                    <span className={`material-symbols-outlined text-[28px] ${greetingData.colorClass} select-none animate-bounce`}>
+                      {greetingData.icon}
+                    </span>
+                  )}
+                  <h1 className="text-headline-lg font-extrabold text-on-surface">
+                    {greetingData ? greetingData.text : (portalMode === 'admin' ? 'Admin Login' : 'Employee Login')}
+                  </h1>
+                </div>
+                <p className="text-body-md text-on-surface-variant mb-8">
+                  {portalMode === 'admin'
+                    ? 'Sign in to manage bookings, availability and your team.'
+                    : 'Sign in to access therapist tools, client sessions, and schedules.'}
                 </p>
-              )}
 
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full bg-primary text-on-primary py-3.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-[0.98] transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
-              >
-                {busy ? 'Signing in…' : (<>Sign In <span className="material-symbols-outlined text-[18px]">arrow_forward</span></>)}
-              </button>
-            </form>
+                <form onSubmit={submit} className="space-y-4">
+                  {/* Login ID */}
+                  <div className="gradient-border-wrapper">
+                    <div className="relative w-full bg-surface-container-lowest/90 rounded-[calc(1rem-1px)] flex items-center">
+                      <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">person</span>
+                      <input
+                        value={id}
+                        onChange={(e) => setId(e.target.value)}
+                        onFocus={() => setTypingState('username')}
+                        onBlur={() => setTypingState('none')}
+                        placeholder="Login ID"
+                        autoFocus
+                        autoCapitalize="none"
+                        autoComplete="username"
+                        className={fieldCls}
+                      />
+                    </div>
+                  </div>
 
-            {/* Footer: trouble link */}
-            <div className="mt-8 pt-6 border-t border-outline-variant/40">
-              <p className="text-center text-body-sm text-on-surface-variant/70 flex items-center justify-center gap-1.5">
-                <span className="material-symbols-outlined text-[16px]">help_outline</span>
-                Trouble signing in?{' '}
-                <a
-                  href="https://wa.me/919910525100?text=Hi%2C%20I%20need%20help%20with%20my%20Recharge%20staff%20login."
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary font-bold hover:underline"
-                >
-                  Contact the super admin
-                </a>
-              </p>
-            </div>
+                  {/* Password */}
+                  <div className="gradient-border-wrapper">
+                    <div className="relative w-full bg-surface-container-lowest/90 rounded-[calc(1rem-1px)] flex items-center">
+                      <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant pointer-events-none">lock</span>
+                      <input
+                        type={showPw ? 'text' : 'password'}
+                        value={pw}
+                        onChange={(e) => setPw(e.target.value)}
+                        onFocus={() => setTypingState('password')}
+                        onBlur={() => setTypingState('none')}
+                        placeholder="Password"
+                        autoComplete="current-password"
+                        className={`${fieldCls} pr-11`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((s) => !s)}
+                        title={showPw ? 'Hide password' : 'Show password'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high/40 transition-all duration-200 z-10 active:scale-90"
+                      >
+                        <div className="relative w-5 h-5 flex items-center justify-center pointer-events-none">
+                          <span
+                            className={`material-symbols-outlined text-[20px] absolute transition-all duration-300 transform ${
+                              showPw ? 'opacity-0 scale-75 rotate-45' : 'opacity-100 scale-100 rotate-0'
+                            }`}
+                          >
+                            visibility
+                          </span>
+                          <span
+                            className={`material-symbols-outlined text-[20px] absolute transition-all duration-300 transform ${
+                              showPw ? 'opacity-100 scale-100 rotate-0' : 'opacity-0 scale-75 -rotate-45'
+                            }`}
+                          >
+                            visibility_off
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
 
-            <p className="text-center text-[11px] text-on-surface-variant/50 mt-4 flex items-center justify-center gap-1.5">
-              <span className="material-symbols-outlined text-[14px]">shield</span>
-              Protected staff area · Recharge Rehabilitation
-            </p>
+                  {/* Keep me signed in */}
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                    <span
+                      onClick={() => setRemember((r) => !r)}
+                      className={`inline-flex items-center justify-center w-5 h-5 rounded-md border-2 transition-all duration-200 ${
+                        remember
+                          ? 'bg-primary border-primary text-on-primary'
+                          : 'border-outline-variant text-transparent group-hover:border-primary/60'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">check</span>
+                    </span>
+                    <span className="text-body-sm text-on-surface-variant">Keep me signed in on this device</span>
+                  </label>
+
+                  {err && (
+                    <p className="flex items-center gap-1.5 text-body-sm text-[#B42318]">
+                      <span className="material-symbols-outlined text-[18px]">error</span>
+                      {err}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="w-full bg-primary text-on-primary py-3.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-[0.98] transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {busy ? 'Signing in…' : (<>Sign In <span className="material-symbols-outlined text-[18px]">arrow_forward</span></>)}
+                  </button>
+                </form>
+
+                {/* Footer: trouble link */}
+                <div className="mt-8 pt-6 border-t border-outline-variant/40">
+                  <p className="text-center text-body-sm text-on-surface-variant/70 flex items-center justify-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px]">help_outline</span>
+                    Trouble signing in?{' '}
+                    <a
+                      href="https://wa.me/919910525100?text=Hi%2C%20I%20need%20help%20with%20my%20Recharge%20staff%20login."
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary font-bold hover:underline"
+                    >
+                      Contact the super admin
+                    </a>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-center gap-2 mt-5 text-[11px] text-on-surface-variant/60 bg-surface-container-low/40 border border-outline-variant/30 py-1.5 px-3 rounded-full w-max mx-auto shadow-sm select-none">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span className="material-symbols-outlined text-[13px] text-emerald-500" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
+                  <span>Secure SSL connection · Recharge Rehabilitation</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
