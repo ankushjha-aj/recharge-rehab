@@ -3509,6 +3509,97 @@ const FileUploader: React.FC<{
   onChange: (base64: string) => void;
 }> = ({ label, value, onChange }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [adjustingImg, setAdjustingImg] = useState<string | null>(null);
+
+  // Modal states for adjustment
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (adjustingImg) {
+      const img = new Image();
+      img.onload = () => {
+        setImageSize({ width: img.width, height: img.height });
+      };
+      img.src = adjustingImg;
+      // Reset controls
+      setZoom(1);
+      setRotation(0);
+      setOffset({ x: 0, y: 0 });
+    }
+  }, [adjustingImg]);
+
+  const cropCircleSize = 200;
+  const imgMinDim = Math.min(imageSize.width, imageSize.height) || 1;
+  const baseScale = cropCircleSize / imgMinDim;
+  const displayWidth = imageSize.width * baseScale;
+  const displayHeight = imageSize.height * baseScale;
+
+  const startDrag = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    setDragStart({ x: clientX - offset.x, y: clientY - offset.y });
+  };
+
+  const onDrag = (clientX: number, clientY: number) => {
+    if (!isDragging) return;
+    setOffset({
+      x: clientX - dragStart.x,
+      y: clientY - dragStart.y
+    });
+  };
+
+  const stopDrag = () => {
+    setIsDragging(false);
+  };
+
+  const rotateRight = () => {
+    setRotation((r) => (r + 90) % 360);
+  };
+
+  const handleCropApply = () => {
+    if (!adjustingImg) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const scaleFactor = canvas.width / cropCircleSize; // 400 / 200 = 2.0
+      
+      // Move to visual center of crop circle
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.translate(offset.x * scaleFactor, offset.y * scaleFactor);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.scale(zoom * scaleFactor, zoom * scaleFactor);
+
+      const drawWidth = imageSize.width * baseScale;
+      const drawHeight = imageSize.height * baseScale;
+      ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+
+      const base64 = canvas.toDataURL('image/jpeg', 0.9);
+      onChange(base64);
+      setAdjustingImg(null);
+    };
+    img.src = adjustingImg;
+  };
+
+  const imageStyle: React.CSSProperties = {
+    width: `${displayWidth}px`,
+    height: `${displayHeight}px`,
+    transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom}) rotate(${rotation}deg)`,
+    transformOrigin: 'center center',
+    cursor: isDragging ? 'grabbing' : 'grab',
+    maxWidth: 'none',
+    maxHeight: 'none',
+  };
+
   return (
     <div className="flex flex-col gap-1.5 mt-2 bg-surface-container-high/20 border border-outline-variant/30 rounded-xl p-3">
       <span className="text-body-xs font-bold text-on-surface-variant">{label}</span>
@@ -3525,7 +3616,17 @@ const FileUploader: React.FC<{
           ref={fileInputRef}
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) handleFileToBase64(file, onChange);
+            if (file) {
+              if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  setAdjustingImg(reader.result as string);
+                };
+                reader.readAsDataURL(file);
+              } else {
+                handleFileToBase64(file, onChange);
+              }
+            }
           }}
           className="hidden"
           accept="image/*,application/pdf"
@@ -3547,6 +3648,107 @@ const FileUploader: React.FC<{
           <span className="text-body-xs text-on-surface-variant/40 italic">No file uploaded (optional)</span>
         )}
       </div>
+
+      {/* Image adjustment Modal */}
+      {adjustingImg && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] grid place-items-center p-4">
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] w-full max-w-md p-6 shadow-2xl space-y-5 animate-in fade-in duration-200">
+            <div className="text-center">
+              <h3 className="text-headline-sm font-bold text-on-surface">Adjust Profile Image</h3>
+              <p className="text-xs text-on-surface-variant mt-1">Drag to position, use the slider to zoom, and rotate if needed.</p>
+            </div>
+
+            {/* Visual Workspace */}
+            <div className="flex justify-center select-none">
+              <div 
+                className="relative w-[280px] h-[280px] bg-neutral-950 overflow-hidden rounded-2xl flex items-center justify-center border border-outline-variant/30"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  startDrag(e.clientX, e.clientY);
+                }}
+                onMouseMove={(e) => {
+                  onDrag(e.clientX, e.clientY);
+                }}
+                onMouseUp={stopDrag}
+                onMouseLeave={stopDrag}
+                onTouchStart={(e) => {
+                  if (e.touches[0]) {
+                    startDrag(e.touches[0].clientX, e.touches[0].clientY);
+                  }
+                }}
+                onTouchMove={(e) => {
+                  if (e.touches[0]) {
+                    onDrag(e.touches[0].clientX, e.touches[0].clientY);
+                  }
+                }}
+                onTouchEnd={stopDrag}
+              >
+                {/* Zoomable Image */}
+                {imageSize.width > 0 && (
+                  <img 
+                    src={adjustingImg} 
+                    alt="Adjust preview" 
+                    style={imageStyle}
+                  />
+                )}
+
+                {/* Circle Crop Mask */}
+                <div className="absolute w-[200px] h-[200px] rounded-full border-2 border-dashed border-white pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 bg-white rounded-full opacity-40" />
+                </div>
+              </div>
+            </div>
+
+            {/* Sliders & Controls */}
+            <div className="space-y-4">
+              {/* Zoom Slider */}
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-on-surface-variant text-[20px] select-none">zoom_out</span>
+                <input 
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.02"
+                  value={zoom}
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className="flex-1 accent-primary h-1 bg-surface-container-high rounded-lg appearance-none cursor-pointer"
+                />
+                <span className="material-symbols-outlined text-on-surface-variant text-[20px] select-none">zoom_in</span>
+              </div>
+
+              {/* Rotate Button */}
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={rotateRight}
+                  className="flex items-center gap-1.5 bg-surface-container-high hover:bg-surface-container-high/80 text-on-surface px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer select-none"
+                >
+                  <span className="material-symbols-outlined text-[16px]">rotate_right</span>
+                  Rotate 90°
+                </button>
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex justify-end gap-2 border-t border-outline-variant/30 pt-4">
+              <button
+                type="button"
+                onClick={() => setAdjustingImg(null)}
+                className="px-4 py-2 border border-outline-variant rounded-full text-xs font-bold hover:bg-surface-container-high/20 transition cursor-pointer select-none"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCropApply}
+                className="bg-primary text-on-primary px-5 py-2 rounded-full font-bold text-xs hover:brightness-105 active:scale-95 transition shadow cursor-pointer select-none"
+              >
+                Apply & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
