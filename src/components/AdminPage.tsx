@@ -3129,80 +3129,43 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
 const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ sessions }) => {
   const today = todayISO();
   const [selectedDate, setSelectedDate] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
-  const formatYearMonth = (ym: string) => {
-    if (ym === 'TBD') return 'Date TBD';
-    const [year, month] = ym.split('-');
-    const d = new Date(parseInt(year), parseInt(month) - 1, 1);
-    return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-  };
-
-  const groupedSessions = useMemo(() => {
-    const filtered = sessions.filter((s) => {
+  // Filter and sort sessions (most recent date first)
+  const filteredSessions = useMemo(() => {
+    return sessions.filter((s) => {
       if (selectedDate) {
         return s.date === selectedDate;
       }
       return true;
+    }).sort((a, b) => {
+      const dateA = a.date || '';
+      const dateB = b.date || '';
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      const slotA = a.slot || '';
+      const slotB = b.slot || '';
+      return slotB.localeCompare(slotA);
     });
-
-    const groups: Record<string, BookingRequest[]> = {};
-    filtered.forEach((s) => {
-      const key = s.date ? s.date.substring(0, 7) : 'TBD';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(s);
-    });
-
-    // Sort keys descending
-    return Object.keys(groups)
-      .sort((a, b) => b.localeCompare(a))
-      .reduce((obj, key) => {
-        obj[key] = groups[key];
-        return obj;
-      }, {} as Record<string, BookingRequest[]>);
   }, [sessions, selectedDate]);
 
-  const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => {
-    const isBlocked = s.source === 'blocked';
-    const isPast = s.date && s.date < today;
-    return (
-      <div
-        className={`flex items-center justify-between gap-3 border rounded-xl px-4 py-3 transition ${
-          isBlocked
-            ? 'bg-[#FEF0C7]/10 border-[#FDE293]/60'
-            : isPast
-            ? 'bg-surface-container-low/40 border-outline-variant/20'
-            : 'bg-surface-container-lowest border-outline-variant'
-        }`}
-      >
-        <div className="min-w-0">
-          <p className="font-bold text-on-surface text-sm truncate flex items-center gap-1.5 flex-wrap">
-            <span>{isBlocked && s.sessionType === 'CSV Schedule Block' ? `Child: ${s.parentName}` : s.parentName || 'Client'}</span>
-            <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
-              isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
-            }`}>
-              {s.sessionType}
-            </span>
-          </p>
-          <p className="text-body-sm text-on-surface-variant">
-            {s.mode === 'online' ? 'Online' : 'In-Clinic'} · {s.slot ? formatSlot(s.slot) : 'time TBD'}
-            {s.date ? ` · ${s.date}` : ''}
-          </p>
-        </div>
-        <span
-          className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shrink-0 ${
-            isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary-fixed text-primary'
-          }`}
-        >
-          {isBlocked ? 'Blocked' : s.status}
-        </span>
-      </div>
-    );
-  };
+  // Reset page when filter or page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedDate, pageSize]);
+
+  // Paginated sessions
+  const paginatedSessions = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredSessions.slice(startIndex, startIndex + pageSize);
+  }, [filteredSessions, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredSessions.length / pageSize) || 1;
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto">
+    <div className="space-y-6 w-full max-w-7xl mx-auto animate-in fade-in duration-200">
       {/* Header and Filter panel */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
             <span className="material-symbols-outlined text-primary">calendar_month</span>
@@ -3215,23 +3178,18 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
 
         {/* Dropdown & Calendar Filters */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Calendar Picker */}
           <div className="flex items-center gap-2 bg-surface-container-high hover:bg-surface-container-high/80 border border-outline-variant rounded-full py-1.5 px-4 text-xs font-bold text-on-surface transition focus-within:ring-2 focus-within:ring-primary/20">
             <span className="material-symbols-outlined text-[16px] text-on-surface-variant select-none">calendar_today</span>
             <span>Choose Date:</span>
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => {
-                setSelectedDate(e.target.value);
-              }}
+              onChange={(e) => setSelectedDate(e.target.value)}
               className="bg-transparent text-xs text-on-surface outline-none cursor-pointer border-none p-0 focus:ring-0 w-28 font-bold"
             />
             {selectedDate && (
               <button
-                onClick={() => {
-                  setSelectedDate('');
-                }}
+                onClick={() => setSelectedDate('')}
                 className="text-on-surface-variant hover:text-primary transition p-0.5"
                 title="Clear date filter"
               >
@@ -3242,26 +3200,132 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
         </div>
       </div>
 
-      {/* Grouped Month Views */}
-      <div className="space-y-6">
-        {Object.keys(groupedSessions).length === 0 ? (
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-8 text-center">
+      {/* Sessions Table view */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm space-y-4">
+        {filteredSessions.length === 0 ? (
+          <div className="p-8 text-center">
             <p className="text-body-md text-on-surface-variant italic font-semibold">No sessions match the selected filter criteria.</p>
           </div>
         ) : (
-          Object.keys(groupedSessions).map((monthKey) => (
-            <div key={monthKey} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm space-y-4">
-              <h3 className="text-title-medium font-extrabold text-primary border-b border-outline-variant/30 pb-2 flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px]">event</span>
-                {formatYearMonth(monthKey)}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {groupedSessions[monthKey].map((s) => (
-                  <SessionRow key={s.id} s={s} />
-                ))}
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
+                    <th className="pb-3 px-4 font-extrabold">Date</th>
+                    <th className="pb-3 px-4 font-extrabold">Time</th>
+                    <th className="pb-3 px-4 font-extrabold">Client / Child</th>
+                    <th className="pb-3 px-4 font-extrabold">Session Type</th>
+                    <th className="pb-3 px-4 font-extrabold">Mode</th>
+                    <th className="pb-3 px-4 text-right font-extrabold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="text-on-surface">
+                  {paginatedSessions.map((s) => {
+                    const isBlocked = s.source === 'blocked';
+                    const isPast = s.date && s.date < today;
+                    return (
+                      <tr
+                        key={s.id}
+                        className={`hover:bg-surface-container-high/15 transition-colors ${
+                          isBlocked
+                            ? 'bg-[#FEF0C7]/5'
+                            : isPast
+                            ? 'opacity-75'
+                            : ''
+                        }`}
+                      >
+                        <td className="py-3.5 px-4 text-xs font-medium text-on-surface">
+                          {s.date || <span className="text-on-surface-variant/40 italic">TBD</span>}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs font-semibold text-on-surface-variant">
+                          {s.slot ? formatSlot(s.slot) : <span className="text-on-surface-variant/40 italic">TBD</span>}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-sm">
+                          {isBlocked && s.sessionType === 'CSV Schedule Block'
+                            ? `Child: ${s.parentName}`
+                            : s.parentName || 'Client'}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                            isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
+                          }`}>
+                            {s.sessionType || 'Session'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs capitalize text-on-surface-variant">
+                          {s.mode === 'online' ? 'Online' : 'In-Clinic'}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <span
+                            className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shrink-0 ${
+                              isBlocked
+                                ? 'bg-[#FEF0C7] text-[#B54708]'
+                                : s.status === 'confirmed'
+                                ? 'bg-[#D1FADF] text-[#027A48]'
+                                : s.status === 'cancelled'
+                                ? 'bg-[#FEE4E2] text-[#B42318]'
+                                : 'bg-primary-fixed text-primary'
+                            }`}
+                          >
+                            {isBlocked ? 'Blocked' : s.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Panel */}
+            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-outline-variant/20 pt-4 gap-4">
+              {/* Dropdown on the left side of page numbers */}
+              <div className="flex items-center gap-2.5 text-xs text-on-surface-variant">
+                <span>Sessions per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="bg-surface-container-high border border-outline-variant rounded-full py-1.5 px-3 font-bold text-on-surface outline-none cursor-pointer focus:ring-2 focus:ring-primary/20 text-xs"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={30}>30</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
+
+              {/* Page navigation controls */}
+              <div className="flex items-center gap-3">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="w-8 h-8 rounded-full border border-outline-variant/30 flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-primary disabled:opacity-40 disabled:hover:text-on-surface-variant disabled:hover:border-outline-variant/30 transition-all cursor-pointer active:scale-95"
+                  title="Previous Page"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                </button>
+                
+                <span className="text-xs font-semibold text-on-surface-variant">
+                  Page <strong className="text-on-surface">{currentPage}</strong> of <strong className="text-on-surface">{totalPages}</strong>
+                </span>
+
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="w-8 h-8 rounded-full border border-outline-variant/30 flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-primary disabled:opacity-40 disabled:hover:text-on-surface-variant disabled:hover:border-outline-variant/30 transition-all cursor-pointer active:scale-95"
+                  title="Next Page"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                </button>
+              </div>
+
+              {/* Total count status */}
+              <div className="text-xs text-on-surface-variant/80 font-medium">
+                Showing {Math.min(filteredSessions.length, (currentPage - 1) * pageSize + 1)}–{Math.min(filteredSessions.length, currentPage * pageSize)} of {filteredSessions.length} sessions
               </div>
             </div>
-          ))
+          </>
         )}
       </div>
     </div>
