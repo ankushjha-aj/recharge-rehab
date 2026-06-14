@@ -161,11 +161,14 @@ const EmptyState: React.FC<{ icon: string; text: string }> = ({ icon, text }) =>
 // ===========================================================================
 // Root: login gate → role routing
 // ===========================================================================
-const AdminPage: React.FC = () => {
+interface AdminPageProps {
+  path?: string;
+}
+
+const AdminPage: React.FC<AdminPageProps> = ({ path = window.location.pathname }) => {
   const [user, setUser] = useState<User | null>(getCurrentUser());
   const [checking, setChecking] = useState(true);
 
-  const path = window.location.pathname;
   const isEmployeePath = path.startsWith('/employee');
 
   useEffect(() => {
@@ -188,7 +191,7 @@ const AdminPage: React.FC = () => {
     return <div className="flex-grow bg-background grid place-items-center text-on-surface-variant">Loading…</div>;
   }
   if (!user) return <LoginForm onLoggedIn={setUser} isEmployeePath={isEmployeePath} />;
-  return <AdminDashboard user={user} onLogout={handleLogout} />;
+  return <AdminDashboard user={user} onLogout={handleLogout} path={path} />;
 };
 
 // ===========================================================================
@@ -658,11 +661,52 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void; isEmployeePath: boole
 // ===========================================================================
 // Admin / Super Admin dashboard
 // ===========================================================================
-const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, onLogout }) => {
+const getTabFromPath = (pathname: string, role: string): Tab => {
+  if (role === 'employee') {
+    if (pathname.includes('/sessions')) return 'sessions';
+    if (pathname.includes('/profile')) return 'profile';
+    if (pathname.includes('/reset-password') || pathname.includes('/reset_password')) return 'reset_password';
+    if (pathname.includes('/salary')) return 'salary';
+    if (pathname.includes('/offer-letter') || pathname.includes('/offer_letter')) return 'offer_letter';
+    if (pathname.includes('/leaves')) return 'leaves';
+    return 'dashboard';
+  } else {
+    if (pathname.includes('/employees')) return 'employees';
+    if (pathname.includes('/availability')) return 'availability';
+    if (pathname.includes('/payments')) return 'payments';
+    if (pathname.includes('/compensation')) return 'compensation';
+    if (pathname.includes('/database')) return 'database';
+    return 'requests';
+  }
+};
+
+const getPathFromTab = (tabId: Tab, role: string): string => {
+  if (role === 'employee') {
+    if (tabId === 'dashboard') return '/employee';
+    if (tabId === 'reset_password') return '/employee/reset-password';
+    if (tabId === 'offer_letter') return '/employee/offer-letter';
+    return `/employee/${tabId}`;
+  } else {
+    if (tabId === 'requests') return '/admin';
+    return `/admin/${tabId}`;
+  }
+};
+
+const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string }> = ({ user, onLogout, path }) => {
   const isSuper = user.role === 'super_admin';
   const [tab, setTab] = useState<Tab>(() => {
-    return user.role === 'employee' ? 'dashboard' : 'requests';
+    return getTabFromPath(path, user.role);
   });
+
+  useEffect(() => {
+    setTab(getTabFromPath(path, user.role));
+  }, [path, user.role]);
+
+  const navigateToTab = (newTab: Tab) => {
+    const newPath = getPathFromTab(newTab, user.role);
+    window.history.pushState({}, '', newPath);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -811,8 +855,8 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                if (tab !== 'requests') {
-                  setTab('requests');
+                if (user.role !== 'employee' && tab !== 'requests') {
+                  navigateToTab('requests');
                 }
               }}
               placeholder="Search bookings..."
@@ -1002,9 +1046,9 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
                     ? unseen.length
                     : (t.id === 'employees' ? pendingLeaves.length : 0);
                   return (
-                    <button
+                    <a
                       key={t.id}
-                      onClick={() => setTab(t.id)}
+                      href={getPathFromTab(t.id, user.role)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left text-body-sm font-bold transition-all relative cursor-pointer ${
                         active
                           ? 'bg-primary text-on-primary shadow-sm hover:brightness-105'
@@ -1022,7 +1066,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
                           {badge}
                         </span>
                       )}
-                    </button>
+                    </a>
                   );
                 })}
               </nav>
@@ -2698,8 +2742,10 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
   }, [user.id, currentMonth]);
 
   const todays = useMemo(() => sessions.filter((s) => s.date === today && s.status !== 'cancelled'), [sessions, today]);
-  const clientSessions = useMemo(() => todays.filter((s) => s.source !== 'blocked'), [todays]);
   const blockedSessions = useMemo(() => todays.filter((s) => s.source === 'blocked'), [todays]);
+  const freeSlotsCount = useMemo(() => {
+    return SLOT_TIMES.filter((time) => !todays.some((x) => x.slot === time)).length;
+  }, [todays]);
 
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto">
@@ -2715,9 +2761,9 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
             </p>
           </div>
           <div className="flex gap-4 shrink-0 flex-wrap">
-            <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3 text-center min-w-[120px]">
-              <span className="block text-[10px] uppercase font-black tracking-wider text-primary">Client Sessions</span>
-              <span className="text-2xl font-black text-primary">{clientSessions.length}</span>
+            <div className="bg-[#D1FADF] border border-[#A6F4C5] rounded-2xl px-5 py-3 text-center min-w-[120px]">
+              <span className="block text-[10px] uppercase font-black tracking-wider text-[#027A48]">Free Slots</span>
+              <span className="text-2xl font-black text-[#027A48]">{freeSlotsCount}</span>
             </div>
             <div className="bg-[#FEF0C7] border border-[#FDE293] rounded-2xl px-5 py-3 text-center min-w-[120px]">
               <span className="block text-[10px] uppercase font-black tracking-wider text-[#B54708]">Blocked Slots</span>

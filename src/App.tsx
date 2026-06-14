@@ -13,15 +13,7 @@ import AdminPage from './components/AdminPage';
 
 // Path routes start with "/" so in-page anchors (e.g. "#approach") are ignored.
 const getRoute = () => {
-  const path = window.location.pathname;
-  if (path.startsWith('/admin')) return '/admin';
-  if (path.startsWith('/employee')) return '/employee';
-  if (path.startsWith('/about')) return '/about';
-  if (path.startsWith('/contact')) return '/contact';
-  if (path.startsWith('/gallery')) return '/gallery';
-  if (path.startsWith('/services')) return '/services';
-  if (path.startsWith('/book')) return '/book';
-  return '/';
+  return window.location.pathname;
 };
 
 function App() {
@@ -69,10 +61,10 @@ function App() {
   };
 
   // Admin & Employee are standalone, passcode-gated screens — no public navbar/footer/FAB.
-  if (route === '/admin' || route === '/employee') {
+  if (route.startsWith('/admin') || route.startsWith('/employee')) {
     return (
       <div className="bg-background text-on-surface flex flex-col min-h-screen">
-        <AdminPage />
+        <AdminPage path={route} />
       </div>
     );
   }
@@ -83,15 +75,15 @@ function App() {
           (a transformed ancestor becomes the sticky containing block and breaks it). */}
       <Navbar route={route} onBookConsultation={openModal} onWIP={triggerWIP} />
 
-      {route === '/about' ? (
+      {route.startsWith('/about') ? (
         <AboutPage onBookConsultation={openModal} />
-      ) : route === '/contact' ? (
+      ) : route.startsWith('/contact') ? (
         <ContactPage onBookConsultation={openModal} />
-      ) : route === '/gallery' ? (
+      ) : route.startsWith('/gallery') ? (
         <GalleryPage onBookConsultation={openModal} />
-      ) : route === '/services' ? (
+      ) : route.startsWith('/services') ? (
         <ServicesPage onBookConsultation={openModal} />
-      ) : route === '/book' ? (
+      ) : route.startsWith('/book') ? (
         <BookingPage onBookConsultation={openModal} />
       ) : (
         <HomePage onBookConsultation={openModal} />
