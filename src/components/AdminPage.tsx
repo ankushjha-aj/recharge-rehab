@@ -43,10 +43,7 @@ import {
   listAllLeaves,
   updateLeaveStatus,
   markLeavesSeen,
-  punchIn,
-  getTodayAttendance,
   type LeaveRequest,
-  type AttendanceRecord,
   calculateSalary,
   getSalarySettings,
   updateSalarySettings,
@@ -718,8 +715,6 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string 
   const [meUser, setMeUser] = useState<User>(user);
   const [myLeaves, setMyLeaves] = useState<LeaveRequest[]>([]);
   const [allLeaves, setAllLeaves] = useState<LeaveRequest[]>([]);
-  const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
-
 
   // Status state initialized from localStorage
   const [status, setStatusState] = useState<'online' | 'offline' | 'lunch'>(() => {
@@ -736,14 +731,12 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string 
     setLoading(true);
     try {
       if (user.role === 'employee') {
-        const [s, l, att] = await Promise.all([
+        const [s, l] = await Promise.all([
           listMySessions(),
-          listMyLeaves(),
-          getTodayAttendance().catch(() => null)
+          listMyLeaves()
         ]);
         setMySessions(s);
         setMyLeaves(l);
-        setTodayAttendance(att);
       } else {
         const [b, u, lr] = await Promise.all([
           listBookings(),
@@ -911,34 +904,6 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string 
           <ThemeToggle />
 
           <div className="w-px h-4 bg-outline-variant/40" />
-
-          {user.role === 'employee' && (
-            <div className="flex items-center">
-              {todayAttendance ? (
-                <div className="flex items-center gap-1.5 bg-[#D1FADF] text-[#027A48] px-3.5 py-1.5 rounded-full text-xs font-bold shadow-sm select-none">
-                  <span className="material-symbols-outlined text-[16px] animate-pulse">check_circle</span>
-                  Punched In {todayAttendance.punchIn.slice(0, 5)}
-                </div>
-              ) : (
-                <button
-                  onClick={async () => {
-                    try {
-                      const res = await punchIn();
-                      setTodayAttendance(res);
-                      alert(`Punched in successfully at ${res.punchIn}! Marked as Present.`);
-                    } catch (err) {
-                      alert(err instanceof Error ? err.message : 'Punch in failed');
-                    }
-                  }}
-                  className="flex items-center gap-1.5 bg-primary text-on-primary hover:brightness-105 active:scale-95 px-4 py-1.5 rounded-full text-xs font-black transition-all shadow-md cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">fingerprint</span>
-                  Punch In
-                </button>
-              )}
-              <div className="w-px h-4 bg-outline-variant/40 mx-3" />
-            </div>
-          )}
 
           {/* Profile Button / Dropdown */}
           <div className="relative">
@@ -1546,66 +1511,157 @@ const RequestsTab: React.FC<{
       {filtered.length === 0 ? (
         <EmptyState icon="inbox" text={`No ${source === 'booking' ? 'session' : 'consultation'} requests match your filters.`} />
       ) : (
-        <div className="space-y-3">
-          {filtered.map((b) => (
-            <div key={b.id} className={`bg-surface-container-lowest border rounded-[1.25rem] p-5 shadow-sm ${!b.seen ? 'border-primary/60 ring-1 ring-primary/20' : 'border-outline-variant'}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <h3 className="text-headline-sm font-bold text-on-surface">{b.parentName || 'Unknown'}</h3>
-                    {!b.seen && <Pill cls="bg-[#F04438] text-white">New</Pill>}
-                    <Pill cls={STATUS_META[b.status].cls}>{STATUS_META[b.status].label}</Pill>
-                    <Pill cls={PAYMENT_META[b.payment].cls}>{PAYMENT_META[b.payment].label}</Pill>
-                  </div>
-                  <p className="text-body-sm text-on-surface-variant">
-                    {b.sessionType} · {b.mode === 'online' ? 'Online' : 'In-Clinic'} · {staffName(b.specialistId)}
-                  </p>
-                  <p className="text-body-sm text-on-surface-variant">
-                    {b.date ? <>📅 {b.date}{b.slot ? ` · ${formatSlot(b.slot)}` : ''} · </> : null}📞 {b.phone} · 👶 {b.childAge || '—'} yrs
-                  </p>
-                  {(b.concern || b.notes) && (
-                    <p className="text-body-sm text-on-surface-variant mt-1">
-                      {b.concern && <span className="font-semibold">{b.concern}. </span>}
-                      {b.notes}
-                    </p>
-                  )}
-                  <p className="text-[11px] text-on-surface-variant/70 mt-1">Requested {fmtDate(b.requestedAt)}</p>
-                </div>
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
+                <th className="pb-3 px-4 font-extrabold">Client / Child</th>
+                <th className="pb-3 px-4 font-extrabold">Schedule Details</th>
+                <th className="pb-3 px-4 font-extrabold">Session Info</th>
+                <th className="pb-3 px-4 font-extrabold">Status & Payment</th>
+                <th className="pb-3 px-4 text-right font-extrabold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="text-on-surface">
+              {filtered.map((b) => (
+                <tr 
+                  key={b.id} 
+                  className={`hover:bg-surface-container-high/15 transition-colors ${!b.seen ? 'bg-primary/5' : ''}`}
+                >
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-primary-fixed/50 text-primary grid place-items-center text-xs font-black uppercase shrink-0 select-none border border-outline-variant/30">
+                        {getInitials(b.parentName || 'Client')}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-sm text-on-surface">{b.parentName || 'Unknown'}</span>
+                          {!b.seen && <span className="bg-[#F04438] text-white text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">New</span>}
+                        </div>
+                        <div className="text-[11px] text-on-surface-variant font-semibold mt-0.5">
+                          📞 {b.phone} · 👶 {b.childAge || '—'} yrs
+                        </div>
+                        <div className="text-[10px] text-on-surface-variant/70 mt-0.5">
+                          Requested: {fmtDate(b.requestedAt)}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="text-xs font-bold text-on-surface">
+                      📅 {b.date || <span className="text-on-surface-variant/40 italic">TBD</span>}
+                    </div>
+                    <div className="text-[11px] text-on-surface-variant font-semibold mt-0.5">
+                      Time: {b.slot ? formatSlot(b.slot) : <span className="text-on-surface-variant/40 italic">TBD</span>}
+                    </div>
+                    <div className="text-[11px] text-on-surface-variant/70 mt-0.5">
+                      Spec: {staffName(b.specialistId)}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="text-xs font-bold text-primary">
+                      {b.sessionType}
+                    </div>
+                    <div className="text-[11px] text-on-surface-variant font-semibold mt-0.5">
+                      Mode: <span className="capitalize">{b.mode === 'online' ? 'Online' : 'In-Clinic'}</span>
+                    </div>
+                    {(b.concern || b.notes) && (
+                      <div className="text-[10px] text-on-surface-variant/85 mt-1 max-w-[220px] truncate" title={b.concern ? `${b.concern}. ${b.notes}` : b.notes}>
+                        {b.concern && <span className="font-semibold">{b.concern}. </span>}
+                        {b.notes}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex flex-col gap-1.5 items-start">
+                      <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${STATUS_META[b.status].cls}`}>
+                        {STATUS_META[b.status].label}
+                      </span>
+                      <select 
+                        value={b.payment} 
+                        onChange={(e) => setPayment(b, e.target.value as PaymentStatus)} 
+                        className="appearance-none bg-surface-container-high border border-outline-variant rounded-full py-0.5 px-2 text-[10px] font-extrabold text-on-surface outline-none cursor-pointer focus:border-primary"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="paid_online">Paid (Online)</option>
+                        <option value="pay_on_visit">Pay on Visit</option>
+                        <option value="waived">Waived</option>
+                      </select>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    <div className="inline-flex items-center gap-2">
+                      <a 
+                        href={waLink(b.phone, `Hello ${b.parentName}, this is Recharge Rehabilitation regarding your ${b.sessionType} request.`)} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        title="WhatsApp" 
+                        className="w-8 h-8 grid place-items-center rounded-full border border-outline-variant/30 text-[#128C7E] hover:bg-[#25D366]/10 hover:border-[#25D366] transition-all cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">chat</span>
+                      </a>
+                      <a 
+                        href={telLink(b.phone)} 
+                        title="Call" 
+                        className="w-8 h-8 grid place-items-center rounded-full border border-outline-variant/30 text-primary hover:bg-primary/10 hover:border-primary transition-all cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">call</span>
+                      </a>
+                      {!b.seen && (
+                        <button 
+                          onClick={() => seen(b)} 
+                          title="Mark as read" 
+                          className="w-8 h-8 grid place-items-center rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-primary hover:border-primary transition-all cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">mark_email_read</span>
+                        </button>
+                      )}
+                      
+                      <div className="flex items-center border border-outline-variant/20 rounded-full p-0.5 bg-surface-container-high/45 gap-0.5">
+                        {b.status !== 'confirmed' && (
+                          <button 
+                            onClick={() => setStatus(b, 'confirmed')} 
+                            title="Confirm" 
+                            className="px-2 py-1 rounded-full text-[9px] font-black uppercase text-[#027A48] hover:bg-[#D1FADF]/40 transition-all cursor-pointer"
+                          >
+                            Confirm
+                          </button>
+                        )}
+                        {b.status !== 'completed' && (
+                          <button 
+                            onClick={() => setStatus(b, 'completed')} 
+                            title="Complete" 
+                            className="px-2 py-1 rounded-full text-[9px] font-black uppercase text-on-surface-variant hover:bg-surface-container-high transition-all cursor-pointer"
+                          >
+                            Complete
+                          </button>
+                        )}
+                        {b.status !== 'cancelled' && (
+                          <button 
+                            onClick={() => setStatus(b, 'cancelled')} 
+                            title="Cancel" 
+                            className="px-2 py-1 rounded-full text-[9px] font-black uppercase text-[#B42318] hover:bg-[#FEE4E2]/40 transition-all cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
 
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  <div className="flex gap-1.5">
-                    <a href={waLink(b.phone, `Hello ${b.parentName}, this is Recharge Rehabilitation regarding your ${b.sessionType} request.`)} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="w-9 h-9 grid place-items-center rounded-full bg-[#25D366]/15 text-[#128C7E] hover:bg-[#25D366] hover:text-white transition-colors">
-                      <span className="material-symbols-outlined text-[18px]">chat</span>
-                    </a>
-                    <a href={telLink(b.phone)} title="Call" className="w-9 h-9 grid place-items-center rounded-full bg-primary-fixed text-primary hover:bg-primary hover:text-on-primary transition-colors">
-                      <span className="material-symbols-outlined text-[18px]">call</span>
-                    </a>
-                    {!b.seen && (
-                      <button onClick={() => seen(b)} title="Mark as read" className="w-9 h-9 grid place-items-center rounded-full bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">mark_email_read</span>
-                      </button>
-                    )}
-                    {isSuper && (
-                      <button onClick={() => remove(b)} title="Delete" className="w-9 h-9 grid place-items-center rounded-full text-on-surface-variant hover:bg-[#FEE4E2] hover:text-[#B42318] transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 justify-end">
-                    {b.status !== 'confirmed' && <button onClick={() => setStatus(b, 'confirmed')} className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#D1FADF] text-[#027A48] hover:brightness-95">Confirm</button>}
-                    {b.status !== 'completed' && <button onClick={() => setStatus(b, 'completed')} className="text-xs font-bold px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:brightness-95">Complete</button>}
-                    {b.status !== 'cancelled' && <button onClick={() => setStatus(b, 'cancelled')} className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#FEE4E2] text-[#B42318] hover:brightness-95">Cancel</button>}
-                  </div>
-                  <select value={b.payment} onChange={(e) => setPayment(b, e.target.value as PaymentStatus)} className="appearance-none bg-transparent border border-outline-variant rounded-full py-1 px-2.5 text-xs text-on-surface focus:border-primary outline-none cursor-pointer">
-                    <option value="pending">Pending</option>
-                    <option value="paid_online">Paid (Online)</option>
-                    <option value="pay_on_visit">Pay on Visit</option>
-                    <option value="waived">Waived</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          ))}
+                      {isSuper && (
+                        <button 
+                          onClick={() => remove(b)} 
+                          title="Delete Permanently" 
+                          className="w-8 h-8 grid place-items-center rounded-full border border-outline-variant/30 text-on-surface-variant hover:bg-[#FEE4E2]/50 hover:text-[#B42318] hover:border-[#FEE4E2] transition-all cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -1839,48 +1895,6 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
   );
 };
 
-const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => void; onReset: (u: User) => void; onRemove: (u: User) => void; onEdit: (u: User) => void; onView: (u: User) => void }> = ({ u, isSuper, onToggle, onReset, onRemove, onEdit, onView }) => {
-  const canEdit = isSuper || u.role === 'employee';
-  return (
-    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div
-            onClick={() => onView(u)}
-            className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center text-primary shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all"
-            title="View full profile"
-          >
-            <span className="material-symbols-outlined text-[20px]">{u.role === 'employee' ? 'badge' : 'shield_person'}</span>
-          </div>
-          <div className="min-w-0">
-            <p
-              onClick={() => onView(u)}
-              className="font-bold text-on-surface truncate cursor-pointer hover:underline hover:text-primary transition-all"
-              title="View full profile"
-            >
-              {u.name || u.id}
-            </p>
-            <p className="text-body-sm text-on-surface-variant truncate">{u.id} · {u.specialty || ROLE_LABEL[u.role]}</p>
-          </div>
-        </div>
-        <Pill cls={u.role === 'super_admin' ? 'bg-[#FEE4E2] text-[#B42318]' : u.role === 'admin' ? 'bg-primary-fixed text-primary' : 'bg-surface-container-high text-on-surface-variant'}>{ROLE_LABEL[u.role]}</Pill>
-      </div>
-      {u.role === 'employee' && (
-        <p className="text-[11px] text-on-surface-variant/80 mt-2">
-          {u.profileComplete ? '✓ Profile complete' : '○ Profile pending'}
-          {u.experience ? ` · ${u.experience}` : ''}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-1.5 mt-3">
-        {canEdit && <button onClick={() => onToggle(u)} className={`text-xs font-bold px-3 py-1.5 rounded-full ${u.active ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-surface-container-high text-on-surface-variant'}`}>{u.active ? 'Active' : 'Inactive'}</button>}
-        {canEdit && <button onClick={() => onEdit(u)} className="text-xs font-bold px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:text-primary">Edit</button>}
-        {canEdit && <button onClick={() => onReset(u)} className="text-xs font-bold px-3 py-1.5 rounded-full bg-primary-fixed text-primary hover:brightness-95">Reset PW</button>}
-        {isSuper && <button onClick={() => onRemove(u)} className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#FEE4E2] text-[#B42318] hover:brightness-95">Delete</button>}
-      </div>
-    </div>
-  );
-};
-
 // ---------------------------------------------------------------------------
 // Employees / accounts
 // ---------------------------------------------------------------------------
@@ -2105,12 +2119,95 @@ const EmployeesTab: React.FC<{
       {subTab === 'accounts' ? (
         <div className="space-y-8">
           {/* Admin/super accounts */}
-          <div>
+          <div className="space-y-3">
             <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Admin accounts</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {admins.map((u) => (
-                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
-              ))}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
+                    <th className="pb-3 px-4 font-extrabold">Name</th>
+                    <th className="pb-3 px-4 font-extrabold">Login ID</th>
+                    <th className="pb-3 px-4 font-extrabold">Role / Specialty</th>
+                    <th className="pb-3 px-4 font-extrabold">Status</th>
+                    <th className="pb-3 px-4 text-right font-extrabold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="text-on-surface">
+                  {admins.map((u) => {
+                    const canEdit = isSuper || u.role === 'employee';
+                    return (
+                      <tr key={u.id} className="hover:bg-surface-container-high/15 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-primary-fixed/50 text-primary grid place-items-center text-xs font-black uppercase shrink-0 overflow-hidden select-none border border-outline-variant/30">
+                              {u.profileImage ? (
+                                <img src={u.profileImage} alt={u.name || u.id} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{getInitials(u.name || u.id)}</span>
+                              )}
+                            </div>
+                            <span 
+                              onClick={() => setViewing(u)}
+                              className="font-bold cursor-pointer hover:underline hover:text-primary transition-all text-sm"
+                            >
+                              {u.name || u.id}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-on-surface-variant">{u.id}</td>
+                        <td className="py-3 px-4 text-xs font-semibold text-on-surface-variant">
+                          {u.specialty || ROLE_LABEL[u.role]}
+                        </td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={`font-semibold ${u.active ? 'text-[#027A48]' : 'text-[#B54708]'}`}>
+                            {u.active ? '✓ Active' : '○ Inactive'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="inline-flex items-center gap-3">
+                            {canEdit && (
+                              <button
+                                onClick={() => setEditing(u)}
+                                title="Edit Profile"
+                                className="w-8 h-8 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-primary hover:border-primary transition-all flex items-center justify-center cursor-pointer active:scale-95"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">edit</span>
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                onClick={() => reset(u)}
+                                className="text-xs font-bold px-3 py-1.5 rounded-full bg-primary-fixed text-primary hover:brightness-95 transition-all cursor-pointer active:scale-95 border border-primary/20"
+                                title="Reset Password"
+                              >
+                                RP
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                onClick={() => toggleActive(u)}
+                                className={`text-xs font-bold px-3 py-1.5 rounded-full ${u.active ? 'bg-[#D1FADF] text-[#027A48] border border-[#A6F4C5]' : 'bg-surface-container-high text-on-surface-variant border border-outline-variant'} hover:brightness-95 transition-all cursor-pointer active:scale-95`}
+                                title="Toggle Active Status"
+                              >
+                                {u.active ? 'Active' : 'Inactive'}
+                              </button>
+                            )}
+                            {isSuper && (
+                              <button
+                                onClick={() => remove(u)}
+                                className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#FEE4E2] text-[#B42318] hover:brightness-95 transition-all cursor-pointer active:scale-95 border border-[#FECDCA]"
+                                title="Delete Admin"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -2132,7 +2229,7 @@ const EmployeesTab: React.FC<{
               </div>
             </div>
             
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm overflow-x-auto">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm overflow-x-auto">
               <table className="w-full text-left text-sm border-collapse">
                 <thead>
                   <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
@@ -2264,7 +2361,7 @@ const LeavesApprovalList: React.FC<{
   const pendingCount = leaves.filter((l) => l.status === 'pending').length;
 
   return (
-    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm space-y-4">
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-headline-sm font-bold text-on-surface">Employee Leave Requests</h3>
         <span className="bg-[#FEF0C7] text-[#B54708] text-xs font-bold px-3 py-1 rounded-full">{pendingCount} Pending</span>
@@ -2450,7 +2547,7 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
       <CsvImportCard date={date} users={users} blocked={blocked} onChange={() => load(date)} />
 
       {/* Manual clinic-wide blocks (closes a time for everyone). */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 md:p-7 shadow-sm">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
         <h3 className="text-headline-sm font-bold text-on-surface mb-1">Clinic-wide blocks</h3>
         <p className="text-body-sm text-on-surface-variant mb-4">Click a time to close it for <strong>every</strong> therapist (e.g. a clinic break). Separate from the CSV import.</p>
         {isSunday ? (
@@ -2541,7 +2638,7 @@ const CsvImportCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
   };
 
   return (
-    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 md:p-7 shadow-sm">
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h3 className="text-headline-sm font-bold text-on-surface mb-1 flex items-center gap-2">
@@ -2643,7 +2740,7 @@ const PaymentsTab: React.FC<{ bookings: BookingRequest[]; onChange: () => void }
   return (
     <div className="space-y-3">
       {ordered.map((b) => (
-        <div key={b.id} className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-4 md:p-5 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div key={b.id} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-4 md:p-5 shadow-sm flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               <h3 className="font-bold text-on-surface">{b.parentName || 'Unknown'}</h3>
@@ -2734,7 +2831,7 @@ const DatabaseTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Table Quick Viewer */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <div>
             <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
@@ -2804,7 +2901,7 @@ const DatabaseTab: React.FC = () => {
       </div>
 
       {/* SQL Query Editor */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm">
         <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2 mb-1">
           <span className="material-symbols-outlined text-primary">terminal</span> Live SQL Query Editor
         </h2>
@@ -3010,118 +3107,113 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
       </div>
 
       {/* Main Today View with chronologically detailed timeline (Booked vs Free Slots) */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm overflow-x-auto">
         <h3 className="text-title-large font-bold text-on-surface mb-4 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
           <span className="material-symbols-outlined text-primary">today</span>
           Today's Schedule & Slot Timeline
         </h3>
 
-        <div className="space-y-3">
-          {SLOT_TIMES.map((time) => {
-            const s = todays.find((x) => x.slot === time);
-            if (s) {
-              const isBlocked = s.source === 'blocked';
-              return (
-                <div
-                  key={time}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border rounded-2xl p-4 transition-all hover:shadow-sm ${
-                    isBlocked
-                      ? 'bg-[#FEF0C7]/20 border-[#FDE293] text-on-surface'
-                      : 'bg-surface-container-lowest border-outline-variant text-on-surface'
-                  }`}
-                >
-                  <div className="flex items-start gap-3.5">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                        isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[20px]">
-                        {isBlocked ? 'block' : s.mode === 'online' ? 'laptop_mac' : 'home_clinic'}
-                      </span>
-                    </div>
-                    <div>
-                      {isBlocked ? (
+        <table className="w-full text-left text-sm border-collapse">
+          <thead>
+            <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
+              <th className="pb-3 px-4 font-extrabold">Time</th>
+              <th className="pb-3 px-4 font-extrabold">Client / Slot Info</th>
+              <th className="pb-3 px-4 font-extrabold">Session Type</th>
+              <th className="pb-3 px-4 font-extrabold">Mode</th>
+              <th className="pb-3 px-4 text-right font-extrabold">Status & Payment</th>
+            </tr>
+          </thead>
+          <tbody className="text-on-surface">
+            {SLOT_TIMES.map((time) => {
+              const s = todays.find((x) => x.slot === time);
+              if (s) {
+                const isBlocked = s.source === 'blocked' || s.status === 'confirmed';
+                return (
+                  <tr 
+                    key={time} 
+                    className={`hover:bg-surface-container-high/15 transition-colors ${
+                      isBlocked ? 'bg-[#FEF0C7]/5' : ''
+                    }`}
+                  >
+                    <td className="py-3.5 px-4 text-xs font-semibold text-on-surface-variant">
+                      {formatSlot(time)}
+                    </td>
+                    <td className="py-3.5 px-4 font-bold text-sm">
+                      {s.source === 'blocked' ? (
                         <div>
-                          <p className="font-extrabold text-[#B54708] text-sm flex items-center gap-1.5 flex-wrap">
-                            <span>{s.sessionType === 'CSV Schedule Block' ? `Child: ${s.parentName}` : `Blocked Slot: ${s.parentName}`}</span>
-                            <span className="text-[10px] px-2 py-0.5 bg-[#FEF0C7] text-[#B54708] rounded-full uppercase tracking-wider font-extrabold border border-[#FDE293]">
-                              {s.sessionType}
-                            </span>
-                          </p>
-                          <p className="text-xs text-on-surface-variant/80 mt-1">
+                          <span>{s.sessionType === 'CSV Schedule Block' ? `Child: ${s.parentName}` : `Blocked Slot: ${s.parentName}`}</span>
+                          <div className="text-[10px] text-on-surface-variant/70 font-semibold mt-0.5">
                             {s.sessionType === 'CSV Schedule Block'
-                              ? `This slot is scheduled for your daily session with child ${s.parentName}.`
-                              : 'This time slot has been blocked for you by the Admin. No public bookings can be placed here.'}
-                          </p>
+                              ? `Daily session with child ${s.parentName}.`
+                              : 'Blocked by Admin. No public bookings allowed.'}
+                          </div>
                         </div>
                       ) : (
                         <div>
-                          <p className="font-extrabold text-on-surface text-sm">
-                            Client: {s.parentName || 'Client'} · <span className="text-primary">{s.sessionType}</span>
-                          </p>
-                          <p className="text-xs text-on-surface-variant/80 mt-1 font-semibold">
-                            {s.mode === 'online' ? 'Online Session' : 'In-Clinic Session'}
-                          </p>
+                          <span>Client: {s.parentName || 'Client'}</span>
                         </div>
                       )}
-                      <p className="text-[11px] font-bold text-on-surface-variant mt-1.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">schedule</span>
-                        Time: {formatSlot(time)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="sm:text-right shrink-0 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 border-t sm:border-t-0 border-outline-variant/20 pt-2.5 sm:pt-0">
-                    <span
-                      className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full ${
-                        isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#027A48]'
-                      }`}
-                    >
-                      {isBlocked ? 'Blocked' : s.status}
-                    </span>
-                    {!isBlocked && (
-                      <span className="text-[10px] font-bold text-on-surface-variant">
-                        Payment: {s.payment === 'paid_online' ? 'Paid' : s.payment === 'pay_on_visit' ? 'Pay on Visit' : s.payment}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
+                      }`}>
+                        {s.sessionType || 'Session'}
                       </span>
-                    )}
-                  </div>
-                </div>
-              );
-            } else {
-              return (
-                <div
-                  key={time}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-dashed border-[#D1FADF] bg-[#D1FADF]/5 rounded-2xl p-4 text-on-surface hover:bg-[#D1FADF]/10 transition-colors"
-                >
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-10 h-10 rounded-full bg-[#D1FADF] text-[#027A48] flex items-center justify-center shrink-0">
-                      <span className="material-symbols-outlined text-[20px]">check_circle</span>
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-[#027A48] text-sm">
-                        Free Slot
-                      </p>
-                      <p className="text-xs text-on-surface-variant/80 mt-1">
-                        No bookings scheduled. You are available to receive direct appointments or walk-ins.
-                      </p>
-                      <p className="text-[11px] font-bold text-on-surface-variant mt-1.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">schedule</span>
-                        Time: {formatSlot(time)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="sm:text-right shrink-0 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 border-t sm:border-t-0 border-[#D1FADF]/20 pt-2.5 sm:pt-0">
-                    <span className="text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-[#D1FADF] text-[#027A48]">
-                      Available
-                    </span>
-                  </div>
-                </div>
-              );
-            }
-          })}
-        </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-xs capitalize text-on-surface-variant">
+                      {s.mode === 'online' ? 'Online' : 'In-Clinic'}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex flex-col gap-1 items-end">
+                        <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shrink-0 ${
+                          isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#027A48]'
+                        }`}>
+                          {isBlocked ? 'Blocked' : s.status}
+                        </span>
+                        {s.source !== 'blocked' && (
+                          <span className="text-[10px] font-semibold text-on-surface-variant mt-0.5">
+                            Payment: {s.payment === 'paid_online' ? 'Paid' : s.payment === 'pay_on_visit' ? 'Pay on Visit' : s.payment}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              } else {
+                return (
+                  <tr 
+                    key={time} 
+                    className="hover:bg-[#D1FADF]/5 transition-colors bg-[#D1FADF]/2"
+                  >
+                    <td className="py-3.5 px-4 text-xs font-semibold text-on-surface-variant">
+                      {formatSlot(time)}
+                    </td>
+                    <td className="py-3.5 px-4 font-extrabold text-[#027A48] text-sm">
+                      Free Slot
+                      <div className="text-[10px] text-on-surface-variant/70 font-semibold mt-0.5">
+                        Available to receive direct appointments or walk-ins.
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#D1FADF] text-[#027A48]">
+                        Free
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-xs text-on-surface-variant/40 italic">
+                      —
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-[#D1FADF] text-[#027A48]">
+                        Available
+                      </span>
+                    </td>
+                  </tr>
+                );
+              }
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -3205,7 +3297,7 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
       </div>
 
       {/* Sessions Table view */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm space-y-4">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
         {filteredSessions.length === 0 ? (
           <div className="p-8 text-center">
             <p className="text-body-md text-on-surface-variant italic font-semibold">No sessions match the selected filter criteria.</p>
@@ -3226,7 +3318,7 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
                 </thead>
                 <tbody className="text-on-surface">
                   {paginatedSessions.map((s) => {
-                    const isBlocked = s.source === 'blocked';
+                    const isBlocked = s.source === 'blocked' || s.status === 'confirmed';
                     const isPast = s.date && s.date < today;
                     return (
                       <tr
