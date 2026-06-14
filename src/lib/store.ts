@@ -67,6 +67,7 @@ export interface User {
   educationGrad?: string;
   isFirstJob?: boolean;
   pastExperience?: string;
+  baseSalary?: number;
 }
 
 export interface BlockedSlot {
@@ -562,6 +563,18 @@ export async function dayAvailability(date: string): Promise<DayAvailability> {
 // ===========================================================================
 // Admin — bookings (remote-only)
 // ===========================================================================
+export async function createAdminBooking(input: Omit<BookingRequest, 'id' | 'requestedAt' | 'updatedAt'>): Promise<BookingRequest> {
+  requireRemote();
+  const record: BookingRequest = {
+    ...input,
+    id: newId(),
+    requestedAt: now(),
+    updatedAt: now(),
+  };
+  await remote('createBooking', record);
+  return record;
+}
+
 export async function listBookings(): Promise<BookingRequest[]> {
   requireRemote();
   return remote<BookingRequest[]>('listBookings', {});
@@ -658,6 +671,32 @@ export async function updateMyProfile(patch: Partial<User>): Promise<User> {
   setCurrentUser(user);
   return user;
 }
+
+export async function calculateSalary(userId: string, month: string): Promise<any> {
+  requireRemote();
+  return remote<any>('calculateSalary', { userId, month });
+}
+
+export async function getSalarySettings(): Promise<any> {
+  requireRemote();
+  return remote<any>('getSalarySettings', {});
+}
+
+export async function updateSalarySettings(settings: any): Promise<any> {
+  requireRemote();
+  return remote<any>('updateSalarySettings', settings);
+}
+
+export async function postSalarySlip(slip: any): Promise<any> {
+  requireRemote();
+  return remote<any>('postSalarySlip', slip);
+}
+
+export async function listSalarySlips(userId?: string): Promise<any[]> {
+  requireRemote();
+  return remote<any[]>('listSalarySlips', { userId });
+}
+
 export async function listMySessions(): Promise<BookingRequest[]> {
   requireRemote();
   return remote<BookingRequest[]>('listMySessions', {});

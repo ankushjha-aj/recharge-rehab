@@ -7,6 +7,7 @@ import {
   listBookings,
   updateBooking,
   deleteBooking,
+  createAdminBooking,
   markSeen,
   markAllSeen,
   listUsers,
@@ -44,6 +45,11 @@ import {
   getTodayAttendance,
   type LeaveRequest,
   type AttendanceRecord,
+  calculateSalary,
+  getSalarySettings,
+  updateSalarySettings,
+  postSalarySlip,
+  listSalarySlips,
 } from '../lib/store';
 import HeroBanner from './HeroBanner';
 import ThemeToggle from './ThemeToggle';
@@ -106,7 +112,7 @@ const FlyingBird: React.FC<{
   );
 };
 
-type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'dashboard' | 'sessions' | 'profile' | 'salary' | 'offer_letter' | 'leaves' | 'reset_password';
+type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'dashboard' | 'sessions' | 'profile' | 'salary' | 'offer_letter' | 'leaves' | 'reset_password' | 'compensation';
 
 const STATUS_META: Record<BookingStatus, { label: string; cls: string }> = {
   requested: { label: 'Requested', cls: 'bg-primary-fixed text-primary' },
@@ -748,6 +754,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
       { id: 'employees' as Tab, label: 'Employees', icon: 'badge' },
       { id: 'availability' as Tab, label: 'Availability', icon: 'event_busy' },
       { id: 'payments' as Tab, label: 'Payments', icon: 'payments' },
+      { id: 'compensation' as Tab, label: 'Salary & Incentive', icon: 'paid' },
       { id: 'database' as Tab, label: 'Database', icon: 'table_chart' },
     ];
   }, [user.role]);
@@ -1050,11 +1057,12 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
           {loading && bookings.length === 0 && <p className="text-body-sm text-on-surface-variant mb-4">Loading…</p>}
 
           {tab === 'requests' && (
-            <RequestsTab bookings={bookings} staffName={staffName} isSuper={isSuper} unseenSessions={unseenSessions} unseenConsults={unseenConsults} onChange={refresh} query={query} />
+            <RequestsTab bookings={bookings} staffName={staffName} isSuper={isSuper} unseenSessions={unseenSessions} unseenConsults={unseenConsults} onChange={refresh} query={query} users={users} />
           )}
           {tab === 'employees' && <EmployeesTab users={users} isSuper={isSuper} allLeaves={allLeaves} onChange={refresh} />}
           {tab === 'availability' && <AvailabilityTab users={users} />}
           {tab === 'payments' && <PaymentsTab bookings={bookings} onChange={refresh} />}
+          {tab === 'compensation' && <CompensationTab users={users} allLeaves={allLeaves} onChange={refresh} />}
           {tab === 'database' && <DatabaseTab />}
           {tab === 'dashboard' && <EmployeeDashboardTab user={meUser} sessions={mySessions} />}
           {tab === 'sessions' && <EmployeeSessionsTab sessions={mySessions} />}
@@ -1101,9 +1109,68 @@ const RequestsTab: React.FC<{
   unseenConsults: number;
   onChange: () => void;
   query: string;
-}> = ({ bookings, staffName, isSuper, unseenSessions, unseenConsults, onChange, query }) => {
+  users: User[];
+}> = ({ bookings, staffName, isSuper, unseenSessions, unseenConsults, onChange, query, users }) => {
   const [source, setSource] = useState<BookingSource>('booking'); // default: Book Sessions
   const [statusFilter, setStatusFilter] = useState<'all' | BookingStatus>('all');
+
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [form, setForm] = useState({
+    source: 'booking' as BookingSource,
+    specialistId: 'any',
+    sessionType: 'Occupational Therapy',
+    date: todayISO(),
+    slot: '10:00',
+    mode: 'clinic' as 'clinic' | 'online',
+    parentName: '',
+    childAge: '',
+    phone: '',
+    concern: '',
+    notes: '',
+    status: 'confirmed' as BookingStatus,
+    payment: 'pay_on_visit' as PaymentStatus,
+  });
+
+  const employees = useMemo(() => users.filter((u) => u.role === 'employee'), [users]);
+
+  const handleCreateBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.parentName) {
+      alert('Client/Parent Name is required.');
+      return;
+    }
+    setIsCreating(true);
+    try {
+      await createAdminBooking({
+        ...form,
+        seen: true,
+      });
+      alert('Booking created successfully.');
+      setShowCreateModal(false);
+      // Reset form
+      setForm({
+        source: 'booking',
+        specialistId: 'any',
+        sessionType: 'Occupational Therapy',
+        date: todayISO(),
+        slot: '10:00',
+        mode: 'clinic',
+        parentName: '',
+        childAge: '',
+        phone: '',
+        concern: '',
+        notes: '',
+        status: 'confirmed',
+        payment: 'pay_on_visit',
+      });
+      onChange();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create booking.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const inSource = useMemo(() => bookings.filter((b) => b.source === source), [bookings, source]);
   const filtered = useMemo(
@@ -1138,7 +1205,214 @@ const RequestsTab: React.FC<{
   const sourceUnseen = source === 'booking' ? unseenSessions : unseenConsults;
 
   return (
-    <div>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-outline-variant/30 pb-4">
+        <div>
+          <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary font-black">calendar_today</span>
+            Booking Requests & Schedule Management
+          </h2>
+          <p className="text-body-sm text-on-surface-variant mt-1">
+            Create, view, confirm, or cancel client sessions and consultations.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+        >
+          <span className="material-symbols-outlined text-[16px] font-bold">add</span>
+          Create Manual Booking
+        </button>
+      </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4" onClick={() => setShowCreateModal(false)}>
+          <form 
+            onSubmit={handleCreateBookingSubmit}
+            className="w-full max-w-lg bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-2xl space-y-4 animate-drop-down-spring max-h-[90vh] overflow-y-auto text-on-surface" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-headline-sm font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-3">
+              <span className="material-symbols-outlined text-primary font-black">edit_calendar</span>
+              Create Manual Booking
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <label className="block col-span-2">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Booking Source</span>
+                <select
+                  value={form.source}
+                  onChange={(e) => setForm({ ...form, source: e.target.value as BookingSource })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  <option value="booking">Book Session (Standard)</option>
+                  <option value="consultation">Consultation Request</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Assigned Specialist</span>
+                <select
+                  value={form.specialistId}
+                  onChange={(e) => setForm({ ...form, specialistId: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  <option value="any">Any Specialist / Auto</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.specialty || 'Therapist'})</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Session Type</span>
+                <input
+                  type="text"
+                  value={form.sessionType}
+                  onChange={(e) => setForm({ ...form, sessionType: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                  placeholder="e.g. Speech Therapy"
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Date</span>
+                <input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Time Slot</span>
+                <select
+                  value={form.slot}
+                  onChange={(e) => setForm({ ...form, slot: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  {SLOT_TIMES.map(t => (
+                    <option key={t} value={t}>{formatSlot(t)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Session Mode</span>
+                <select
+                  value={form.mode}
+                  onChange={(e) => setForm({ ...form, mode: e.target.value as 'clinic' | 'online' })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  <option value="clinic">In-Clinic Session</option>
+                  <option value="online">Online Session</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Payment Status</span>
+                <select
+                  value={form.payment}
+                  onChange={(e) => setForm({ ...form, payment: e.target.value as PaymentStatus })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="paid_online">Paid (Online)</option>
+                  <option value="pay_on_visit">Pay on Visit</option>
+                </select>
+              </label>
+
+              <label className="block col-span-2 border-t border-outline-variant/30 pt-2">
+                <span className="block font-bold text-primary mb-1 uppercase tracking-wide">Client/Parent Name *</span>
+                <input
+                  type="text"
+                  value={form.parentName}
+                  onChange={(e) => setForm({ ...form, parentName: e.target.value })}
+                  className="w-full bg-transparent border border-primary/30 focus:border-primary rounded-xl py-2.5 px-3 text-sm text-on-surface outline-none font-semibold"
+                  placeholder="Full Name of Parent / Client"
+                  required
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Child's Age (years)</span>
+                <input
+                  type="text"
+                  value={form.childAge}
+                  onChange={(e) => setForm({ ...form, childAge: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                  placeholder="e.g. 5"
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Phone Number</span>
+                <input
+                  type="text"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                  placeholder="e.g. +91 9876543210"
+                />
+              </label>
+
+              <label className="block col-span-2">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Concern / Primary Reason</span>
+                <input
+                  type="text"
+                  value={form.concern}
+                  onChange={(e) => setForm({ ...form, concern: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                  placeholder="Primary concerns or goals..."
+                />
+              </label>
+
+              <label className="block col-span-2">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Administrative Notes</span>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none min-h-[60px]"
+                  placeholder="Internal notes or special instructions..."
+                />
+              </label>
+
+              <label className="block col-span-2">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Booking Status</span>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as BookingStatus })}
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                >
+                  <option value="confirmed">Confirmed (Approved)</option>
+                  <option value="requested">Requested (Pending Review)</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-outline-variant/30">
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 border border-outline-variant hover:bg-surface-container-high/30 rounded-full font-bold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isCreating}
+                className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-60"
+              >
+                {isCreating ? 'Creating...' : 'Create Booking'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Filter Row: toggle on left, status choices on right */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-outline-variant/20">
         <div className="flex flex-wrap items-center gap-3">
@@ -1787,7 +2061,16 @@ const LeavesApprovalList: React.FC<{
 
 
 const EditUserModal: React.FC<{ u: User; isSuper: boolean; onClose: () => void; onSaved: () => void }> = ({ u, onClose, onSaved }) => {
-  const [f, setF] = useState({ name: u.name, specialty: u.specialty, gender: u.gender, qualifications: u.qualifications, experience: u.experience, email: u.email, phone: u.phone });
+  const [f, setF] = useState({ 
+    name: u.name, 
+    specialty: u.specialty, 
+    gender: u.gender, 
+    qualifications: u.qualifications, 
+    experience: u.experience, 
+    email: u.email, 
+    phone: u.phone,
+    baseSalary: u.baseSalary || 35000
+  });
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
@@ -1817,6 +2100,16 @@ const EditUserModal: React.FC<{ u: User; isSuper: boolean; onClose: () => void; 
               <input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} />
             </div>
           </Field>
+          {u.role === 'employee' && (
+            <Field label="Base Salary (₹)">
+              <input 
+                type="number" 
+                value={f.baseSalary} 
+                onChange={(e) => setF({ ...f, baseSalary: parseInt(e.target.value) || 0 })} 
+                className={inputCls} 
+              />
+            </Field>
+          )}
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-4 py-2 rounded-full font-bold text-sm border border-outline-variant text-on-surface-variant">Cancel</button>
@@ -2345,11 +2638,23 @@ const DatabaseTab: React.FC = () => {
 // ---------------------------------------------------------------------------
 // Employee — Sessions view
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Employee — Dashboard view
-// ---------------------------------------------------------------------------
 const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }> = ({ user, sessions }) => {
   const today = todayISO();
+  const currentMonth = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const [est, setEst] = useState<any>(null);
+  const [loadingSalary, setLoadingSalary] = useState(false);
+
+  useEffect(() => {
+    setLoadingSalary(true);
+    calculateSalary(user.id, currentMonth)
+      .then(setEst)
+      .catch(() => setEst(null))
+      .finally(() => setLoadingSalary(false));
+  }, [user.id, currentMonth]);
 
   const todays = useMemo(() => sessions.filter((s) => s.date === today), [sessions, today]);
   const clientSessions = useMemo(() => todays.filter((s) => s.source !== 'blocked'), [todays]);
@@ -2357,45 +2662,75 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
 
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto">
-      {/* Welcome Card */}
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-        <div>
-          <h2 className="text-headline-md font-black text-on-surface">Hello, {user.name || 'Staff Member'}!</h2>
-          <p className="text-body-sm text-on-surface-variant mt-1.5">
-            Welcome to your dashboard. Here is an overview of your schedule and availability for today, <strong className="text-primary">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.
-          </p>
+      {/* Welcome Card & Live Earnings Projections */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Welcome */}
+        <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div>
+            <h2 className="text-headline-md font-black text-on-surface">Hello, {user.name || 'Staff Member'}!</h2>
+            <p className="text-body-sm text-on-surface-variant mt-1.5">
+              Welcome to your dashboard. Here is an overview of your schedule and availability for today, <strong className="text-primary">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.
+            </p>
+          </div>
+          <div className="flex gap-4 shrink-0 flex-wrap">
+            <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3 text-center min-w-[120px]">
+              <span className="block text-[10px] uppercase font-black tracking-wider text-primary">Client Sessions</span>
+              <span className="text-2xl font-black text-primary">{clientSessions.length}</span>
+            </div>
+            <div className="bg-[#FEF0C7] border border-[#FDE293] rounded-2xl px-5 py-3 text-center min-w-[120px]">
+              <span className="block text-[10px] uppercase font-black tracking-wider text-[#B54708]">Blocked Slots</span>
+              <span className="text-2xl font-black text-[#B54708]">{blockedSessions.length}</span>
+            </div>
+          </div>
         </div>
-        <div className="flex gap-4 shrink-0 flex-wrap">
-          <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3 text-center min-w-[120px]">
-            <span className="block text-[10px] uppercase font-black tracking-wider text-primary">Client Sessions</span>
-            <span className="text-2xl font-black text-primary">{clientSessions.length}</span>
+
+        {/* Live Earnings Card */}
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="font-extrabold text-xs text-on-surface-variant uppercase tracking-wider">Estimated Earnings Progress</h4>
+            <span className="text-[10px] bg-primary/10 text-primary font-black uppercase px-2 py-0.5 rounded-full">{new Date().toLocaleDateString('en-IN', { month: 'short' })} projection</span>
           </div>
-          <div className="bg-[#FEF0C7] border border-[#FDE293] rounded-2xl px-5 py-3 text-center min-w-[120px]">
-            <span className="block text-[10px] uppercase font-black tracking-wider text-[#B54708]">Blocked Slots</span>
-            <span className="text-2xl font-black text-[#B54708]">{blockedSessions.length}</span>
-          </div>
+          
+          {loadingSalary ? (
+            <p className="text-xs text-on-surface-variant italic py-4">Calculating monthly earnings...</p>
+          ) : est ? (
+            <div className="space-y-2">
+              <div className="flex justify-between items-end">
+                <span className="text-2xl font-black text-[#027A48]">₹{est.netSalary.toLocaleString('en-IN')}</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Base: ₹{est.baseSalary.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="text-[11px] text-on-surface-variant space-y-1 pt-1 border-t border-outline-variant/30">
+                <div className="flex justify-between"><span>Sessions incentive:</span><span className="font-bold text-primary">+₹{est.incentive.toLocaleString('en-IN')} ({est.sessionsCount} sessions)</span></div>
+                <div className="flex justify-between"><span>Leaves taken:</span><span className="font-bold text-[#B42318]">{est.totalLeaves} day(s) {est.sandwichLeavesCount > 0 && ` (+${est.sandwichLeavesCount} sandwich)`}</span></div>
+                {est.deductions > 0 ? (
+                  <div className="flex justify-between"><span>Leaves deduction:</span><span className="font-bold text-[#B42318]">-₹{est.deductions.toLocaleString('en-IN')}</span></div>
+                ) : (
+                  <div className="flex justify-between"><span>Unused leaves bonus:</span><span className="font-bold text-[#027A48]">+₹{est.bonus.toLocaleString('en-IN')}</span></div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-on-surface-variant italic py-4">No payroll information available.</p>
+          )}
         </div>
       </div>
 
-      {/* Main Today View */}
+      {/* Main Today View with chronologically detailed timeline (Booked vs Free Slots) */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm">
         <h3 className="text-title-large font-bold text-on-surface mb-4 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
           <span className="material-symbols-outlined text-primary">today</span>
-          Today's Schedule Detail
+          Today's Schedule & Slot Timeline
         </h3>
 
-        {todays.length === 0 ? (
-          <div className="text-center py-12 border border-dashed border-outline-variant/60 rounded-2xl">
-            <span className="material-symbols-outlined text-[48px] text-on-surface-variant/30 mb-2">event_busy</span>
-            <p className="text-body-md text-on-surface-variant italic font-semibold">No active sessions or blocked slots scheduled for today.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {todays.map((s) => {
+        <div className="space-y-3">
+          {SLOT_TIMES.map((time) => {
+            const s = todays.find((x) => x.slot === time);
+            if (s) {
               const isBlocked = s.source === 'blocked';
               return (
                 <div
-                  key={s.id}
+                  key={time}
                   className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border rounded-2xl p-4 transition-all hover:shadow-sm ${
                     isBlocked
                       ? 'bg-[#FEF0C7]/20 border-[#FDE293] text-on-surface'
@@ -2439,7 +2774,7 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
                       )}
                       <p className="text-[11px] font-bold text-on-surface-variant mt-1.5 flex items-center gap-1">
                         <span className="material-symbols-outlined text-[14px]">schedule</span>
-                        Time: {formatSlot(s.slot)}
+                        Time: {formatSlot(time)}
                       </p>
                     </div>
                   </div>
@@ -2460,9 +2795,40 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
                   </div>
                 </div>
               );
-            })}
-          </div>
-        )}
+            } else {
+              return (
+                <div
+                  key={time}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-dashed border-[#D1FADF] bg-[#D1FADF]/5 rounded-2xl p-4 text-on-surface hover:bg-[#D1FADF]/10 transition-colors"
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-10 h-10 rounded-full bg-[#D1FADF] text-[#027A48] flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-[20px]">check_circle</span>
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-[#027A48] text-sm">
+                        Free Slot
+                      </p>
+                      <p className="text-xs text-on-surface-variant/80 mt-1">
+                        No bookings scheduled. You are available to receive direct appointments or walk-ins.
+                      </p>
+                      <p className="text-[11px] font-bold text-on-surface-variant mt-1.5 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px]">schedule</span>
+                        Time: {formatSlot(time)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="sm:text-right shrink-0 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 border-t sm:border-t-0 border-[#D1FADF]/20 pt-2.5 sm:pt-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-[#D1FADF] text-[#027A48]">
+                      Available
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+          })}
+        </div>
       </div>
     </div>
   );
@@ -3557,17 +3923,520 @@ const EmployeeProfileTab: React.FC<{
 // ---------------------------------------------------------------------------
 // Employee — Salary Slips view
 // ---------------------------------------------------------------------------
-const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
-  const [selectedSlip, setSelectedSlip] = useState<{ month: string; year: number } | null>(null);
+const CompensationTab: React.FC<{
+  users: User[];
+  allLeaves: LeaveRequest[];
+  onChange: () => void;
+}> = ({ users, allLeaves, onChange }) => {
+  useEffect(() => {
+    if (allLeaves && allLeaves.length > 0) {
+      console.log("CompensationTab leave count:", allLeaves.length);
+    }
+  }, [allLeaves]);
 
-  // Hardcode generated monthly slips based on current year
-  const slips = [
-    { month: 'May', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
-    { month: 'April', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
-    { month: 'March', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
-  ];
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [calculating, setCalculating] = useState(false);
+  const [salaryEstimates, setSalaryEstimates] = useState<Record<string, any>>({});
+  const [selectedEmployeeForSlip, setSelectedEmployeeForSlip] = useState<User | null>(null);
+  const [slipData, setSlipData] = useState<any>(null);
+  const [isPosting, setIsPosting] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<any>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  const employees = useMemo(() => users.filter(u => u.role === 'employee'), [users]);
+
+  const fetchEstimates = useCallback(async () => {
+    setCalculating(true);
+    const estimates: Record<string, any> = {};
+    for (const emp of employees) {
+      try {
+        const est = await calculateSalary(emp.id, selectedMonth);
+        estimates[emp.id] = est;
+      } catch (err) {
+        console.error("Failed calculating salary for", emp.id, err);
+      }
+    }
+    setSalaryEstimates(estimates);
+    setCalculating(false);
+  }, [employees, selectedMonth]);
+
+  useEffect(() => {
+    if (employees.length > 0) {
+      fetchEstimates();
+    }
+  }, [selectedMonth, employees.length]);
+
+  const downloadSessionReport = (emp: User, est: any) => {
+    if (!est || !est.sessions || est.sessions.length === 0) {
+      alert("No sessions recorded for this month.");
+      return;
+    }
+    const headers = ["S.No", "Date", "Time Slot", "Child Name", "Type", "Mode", "Source"];
+    const rows = est.sessions.map((s: any, idx: number) => [
+      idx + 1,
+      s.date,
+      formatSlot(s.slot),
+      s.childName || "TBD",
+      s.type || "TBD",
+      s.mode === 'online' ? "Online" : "Clinic",
+      s.source === 'csv' ? "Daily Schedule" : "Direct Booking"
+    ]);
+    
+    // Proper CSV format with BOM for Excel compatibility
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r: any) => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const encodedUri = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `SessionReport_${emp.name.replace(/\s+/g, '_')}_${selectedMonth}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleOpenPostModal = (emp: User, est: any) => {
+    setSelectedEmployeeForSlip(emp);
+    setSlipData({
+      ...est,
+      baseSalary: est.baseSalary,
+      incentive: est.incentive,
+      deductions: est.deductions,
+      bonus: est.bonus,
+      netSalary: est.netSalary
+    });
+  };
+
+  const handleSaveSalarySlip = async () => {
+    if (!selectedEmployeeForSlip || !slipData) return;
+    setIsPosting(true);
+    try {
+      await postSalarySlip({
+        userId: selectedEmployeeForSlip.id,
+        month: selectedMonth,
+        baseSalary: slipData.baseSalary,
+        sessionsCount: slipData.sessionsCount,
+        incentive: slipData.incentive,
+        totalLeaves: slipData.totalLeaves,
+        deductions: slipData.deductions,
+        bonus: slipData.bonus,
+        netSalary: slipData.netSalary
+      });
+      alert(`Salary slip for ${selectedEmployeeForSlip.name} posted successfully.`);
+      setSelectedEmployeeForSlip(null);
+      setSlipData(null);
+      fetchEstimates();
+      onChange();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to post salary slip");
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  const openSettingsModal = async () => {
+    try {
+      const s = await getSalarySettings();
+      setSettingsForm(s);
+      setShowSettings(true);
+    } catch (e) {
+      alert("Failed to load incentive configurations");
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await updateSalarySettings(settingsForm);
+      setShowSettings(false);
+      alert("Clinic incentive and leave rules updated successfully.");
+      fetchEstimates();
+      onChange();
+    } catch (e) {
+      alert("Failed to save rules settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-outline-variant/30 pb-4">
+        <div>
+          <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">payments</span>
+            Salary & Incentive Compensation
+          </h2>
+          <p className="text-body-sm text-on-surface-variant mt-1">
+            Super Admin payroll controller. Calculate, customize, and post monthly payouts.
+          </p>
+        </div>
+        <div className="flex items-center gap-4 flex-wrap">
+          <button
+            onClick={openSettingsModal}
+            className="border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary px-4 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">settings</span>
+            Salary Slip & Incentive Rules
+          </button>
+          
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-bold text-on-surface-variant uppercase">Payroll Month</label>
+            <input 
+              type="month" 
+              value={selectedMonth} 
+              onChange={(e) => setSelectedMonth(e.target.value)} 
+              className="bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+            />
+          </div>
+        </div>
+      </div>
+
+      {calculating ? (
+        <p className="text-body-md text-on-surface-variant italic">Recalculating employee earnings and attendance logs...</p>
+      ) : employees.length === 0 ? (
+        <p className="text-body-md text-on-surface-variant italic">No employees found in the system.</p>
+      ) : (
+        <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead className="bg-surface-container-high border-b border-outline-variant/40">
+              <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
+                <th className="p-4">Employee</th>
+                <th className="p-4">Base Salary</th>
+                <th className="p-4">Sessions Count (CSV/Booked)</th>
+                <th className="p-4">Incentive</th>
+                <th className="p-4">Leaves (Sandwich)</th>
+                <th className="p-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
+              {employees.map((emp) => {
+                const est = salaryEstimates[emp.id];
+                return (
+                  <tr key={emp.id} className="hover:bg-surface-container-low/20 transition-colors">
+                    <td className="p-4">
+                      <p className="font-bold text-on-surface">{emp.name || emp.id}</p>
+                      <p className="text-[11px] text-on-surface-variant">{emp.specialty || 'Therapist'}</p>
+                    </td>
+                    <td className="p-4 text-xs font-semibold">
+                      ₹{(emp.baseSalary || 35000).toLocaleString('en-IN')}
+                    </td>
+                    <td className="p-4">
+                      {est ? (
+                        <button
+                          onClick={() => downloadSessionReport(emp, est)}
+                          className="bg-primary/5 text-primary hover:bg-primary/10 border border-primary/20 px-3 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer"
+                          title="Click to download whole month session details CSV"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">download_for_offline</span>
+                          {est.sessionsCount} session{est.sessionsCount === 1 ? '' : 's'}
+                        </button>
+                      ) : (
+                        <span className="text-on-surface-variant/40 italic">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 font-semibold text-primary">
+                      {est ? `+₹${est.incentive.toLocaleString('en-IN')}` : '-'}
+                    </td>
+                    <td className="p-4 text-xs text-on-surface-variant">
+                      {est ? (
+                        <span>
+                          {est.approvedLeavesCount} day{est.approvedLeavesCount === 1 ? '' : 's'} 
+                          {est.sandwichLeavesCount > 0 && ` (+${est.sandwichLeavesCount} sandwich)`}
+                        </span>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td className="p-4 text-right">
+                      {est ? (
+                        <button
+                          onClick={() => handleOpenPostModal(emp, est)}
+                          className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer"
+                        >
+                          Review & Post Slip
+                        </button>
+                      ) : (
+                        <span className="text-on-surface-variant/40 italic">Calculating...</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Review and Edit Slip Modal */}
+      {selectedEmployeeForSlip && slipData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4" onClick={() => { setSelectedEmployeeForSlip(null); setSlipData(null); }}>
+          <div className="w-full max-w-lg bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-2xl space-y-4 animate-drop-down-spring" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">receipt_long</span>
+              Finalize Payout Slip
+            </h3>
+            <p className="text-body-sm text-on-surface-variant">
+              Confirm or manually adjust the calculated fields for <strong>{selectedEmployeeForSlip.name}</strong> for the period <strong>{selectedMonth}</strong>.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Base Salary (₹)</span>
+                <input 
+                  type="number" 
+                  value={slipData.baseSalary} 
+                  onChange={(e) => {
+                    const base = parseInt(e.target.value) || 0;
+                    setSlipData({ ...slipData, baseSalary: base, netSalary: base + slipData.incentive - slipData.deductions + slipData.bonus });
+                  }} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Session Incentive (₹)</span>
+                <input 
+                  type="number" 
+                  value={slipData.incentive} 
+                  onChange={(e) => {
+                    const inc = parseInt(e.target.value) || 0;
+                    setSlipData({ ...slipData, incentive: inc, netSalary: slipData.baseSalary + inc - slipData.deductions + slipData.bonus });
+                  }} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Leaves Deductions (₹)</span>
+                <input 
+                  type="number" 
+                  value={slipData.deductions} 
+                  onChange={(e) => {
+                    const ded = parseInt(e.target.value) || 0;
+                    setSlipData({ ...slipData, deductions: ded, netSalary: slipData.baseSalary + slipData.incentive - ded + slipData.bonus });
+                  }} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Unused Leaves Bonus (₹)</span>
+                <input 
+                  type="number" 
+                  value={slipData.bonus} 
+                  onChange={(e) => {
+                    const bon = parseInt(e.target.value) || 0;
+                    setSlipData({ ...slipData, bonus: bon, netSalary: slipData.baseSalary + slipData.incentive - slipData.deductions + bon });
+                  }} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <div className="col-span-2 bg-surface-container-high/30 border border-outline-variant/30 rounded-xl p-3 flex justify-between items-center mt-2">
+                <div>
+                  <span className="block text-[10px] text-on-surface-variant font-bold uppercase">Final Payout Net Pay</span>
+                  <span className="text-lg font-black text-[#027A48]">₹{slipData.netSalary.toLocaleString('en-IN')}</span>
+                </div>
+                <span className="text-[10px] bg-[#D1FADF] text-[#027A48] font-bold px-3 py-1 rounded-full uppercase">Net Payable</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-outline-variant/30">
+              <button 
+                onClick={() => { setSelectedEmployeeForSlip(null); setSlipData(null); }} 
+                className="px-4 py-2 border border-outline-variant hover:bg-surface-container-high/30 rounded-full font-bold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveSalarySlip} 
+                disabled={isPosting} 
+                className="bg-[#027A48] text-white hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-60"
+              >
+                {isPosting ? 'Posting...' : 'Post Salary Slip'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Salary rules configurations modal */}
+      {showSettings && settingsForm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4" onClick={() => setShowSettings(false)}>
+          <div className="w-full max-w-xl bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-2xl space-y-4 animate-drop-down-spring max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">settings</span>
+              Configure Clinic Salary Rules
+            </h3>
+            <p className="text-body-sm text-on-surface-variant">
+              Manage the default leaves allowances, leave deductions, and milestone incentives for completed sessions.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="col-span-2 border-b border-outline-variant/30 pb-2">
+                <h4 className="font-bold text-primary text-[11px] uppercase tracking-wider">Leaves Allowances & Adjustments</h4>
+              </div>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Base Paid Leaves (CL)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_base_paid_leaves} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_base_paid_leaves: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Extra Leave Deduction (₹)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_extra_leave_deduction} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_extra_leave_deduction: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+              <label className="block col-span-2">
+                <span className="block font-bold text-on-surface-variant mb-1">Unused Leave Bonus (₹ for taking 0 leaves)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_unused_leave_bonus} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_unused_leave_bonus: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <div className="col-span-2 border-b border-outline-variant/30 pb-2 pt-2">
+                <h4 className="font-bold text-primary text-[11px] uppercase tracking-wider">Session Milestone Incentives</h4>
+              </div>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 1: Sessions Milestone</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier1_sessions} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier1_sessions: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 1: Incentive Amount (₹)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier1_amount} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier1_amount: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 2: Sessions Milestone</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier2_sessions} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier2_sessions: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 2: Incentive Amount (₹)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier2_amount} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier2_amount: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 3: Sessions Milestone</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier3_sessions} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier3_sessions: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+              <label className="block">
+                <span className="block font-bold text-on-surface-variant mb-1">Tier 3: Incentive Amount (₹)</span>
+                <input 
+                  type="number" 
+                  value={settingsForm.salary_incentive_tier3_amount} 
+                  onChange={(e) => setSettingsForm({ ...settingsForm, salary_incentive_tier3_amount: e.target.value })} 
+                  className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none" 
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6 pt-3 border-t border-outline-variant/30">
+              <button 
+                onClick={() => setShowSettings(false)} 
+                className="px-4 py-2 border border-outline-variant hover:bg-surface-container-high/30 rounded-full font-bold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveSettings} 
+                disabled={savingSettings} 
+                className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-60"
+              >
+                {savingSettings ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Salary Slips view
+// ---------------------------------------------------------------------------
+const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
+  const [selectedSlip, setSelectedSlip] = useState<any | null>(null);
+  const [slips, setSlips] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    listSalarySlips()
+      .then(setSlips)
+      .catch(() => setSlips([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const getMonthName = (monthStr: string) => {
+    const [year, monthVal] = monthStr.split('-');
+    const d = new Date(parseInt(year), parseInt(monthVal) - 1, 1);
+    return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  };
+
+  const getNumberWords = (num: number): string => {
+    const words: Record<number, string> = {
+      0: 'Zero', 1: 'One', 2: 'Two', 3: 'Three', 4: 'Four', 5: 'Five', 6: 'Six', 7: 'Seven', 8: 'Eight', 9: 'Nine',
+      10: 'Ten', 11: 'Eleven', 12: 'Twelve', 13: 'Thirteen', 14: 'Fourteen', 15: 'Fifteen', 16: 'Sixteen', 17: 'Seventeen', 18: 'Eighteen', 19: 'Nineteen',
+      20: 'Twenty', 30: 'Thirty', 40: 'Forty', 50: 'Fifty', 60: 'Sixty', 70: 'Seventy', 80: 'Eighty', 90: 'Ninety'
+    };
+    if (num <= 20) return words[num] || '';
+    if (num < 100) return words[Math.floor(num / 10) * 10] + (num % 10 ? ' ' + words[num % 10] : '');
+    if (num < 1000) return words[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' and ' + getNumberWords(num % 100) : '');
+    if (num < 100000) return getNumberWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + getNumberWords(num % 1000) : '');
+    if (num < 10000000) return getNumberWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + getNumberWords(num % 100000) : '');
+    return getNumberWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 ? ' ' + getNumberWords(num % 10000000) : '');
+  };
 
   if (selectedSlip) {
+    const gross = selectedSlip.baseSalary + selectedSlip.incentive;
+    const grossEarningsStr = `₹${gross.toLocaleString('en-IN')}`;
+    const basicPayStr = `₹${selectedSlip.baseSalary.toLocaleString('en-IN')}`;
+    const incentiveStr = `₹${selectedSlip.incentive.toLocaleString('en-IN')}`;
+    const bonusStr = `₹${selectedSlip.bonus.toLocaleString('en-IN')}`;
+    const deductionsStr = `₹${selectedSlip.deductions.toLocaleString('en-IN')}`;
+    const netSalaryStr = `₹${selectedSlip.netSalary.toLocaleString('en-IN')}`;
+    const netWords = getNumberWords(selectedSlip.netSalary) + " Only";
+
     return (
       <div className="space-y-6 max-w-4xl mx-auto w-full">
         {/* Back header */}
@@ -3582,7 +4451,7 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
           
           <div className="flex items-center gap-2">
             <button
-              onClick={() => downloadDocument('salary-slip-print', `Payslip_${selectedSlip.month}_${selectedSlip.year}.html`)}
+              onClick={() => downloadDocument('salary-slip-print', `Payslip_${selectedSlip.month}.html`)}
               className="bg-secondary text-on-secondary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
             >
               <span className="material-symbols-outlined text-[16px]">download</span>
@@ -3604,7 +4473,7 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
           <div className="text-center pb-4 border-b-2 border-slate-300 space-y-1">
             <h2 className="text-lg font-black tracking-tight text-slate-950">RECHARGE REHABILITATION PRIVATE LIMITED</h2>
             <p className="text-[10px] text-slate-500">Regd Office: Sector 5, Dwarka, New Delhi - 110075</p>
-            <h3 className="font-bold text-xs bg-slate-100 py-1 max-w-[200px] mx-auto rounded">PAYSLIP FOR {selectedSlip.month.toUpperCase()} {selectedSlip.year}</h3>
+            <h3 className="font-bold text-xs bg-slate-100 py-1 max-w-[250px] mx-auto rounded">PAYSLIP FOR {getMonthName(selectedSlip.month).toUpperCase()}</h3>
           </div>
 
           {/* Employee Details Grid */}
@@ -3616,9 +4485,9 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
               <p><strong>Department:</strong> Rehabilitation Services</p>
             </div>
             <div className="space-y-1 text-right sm:text-left">
-              <p><strong>Days Paid:</strong> 30</p>
+              <p><strong>Sessions Completed:</strong> {selectedSlip.sessionsCount}</p>
+              <p><strong>Leaves Counted (incl Sandwich):</strong> {selectedSlip.leavesCount}</p>
               <p><strong>Bank A/C No:</strong> ************5643</p>
-              <p><strong>PF Account No:</strong> DL/DWA/0098765/000/0034</p>
               <p><strong>PAN:</strong> APM*****5D</p>
             </div>
           </div>
@@ -3629,21 +4498,18 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
             <div>
               <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Earnings</h4>
               <div className="space-y-1.5">
-                <div className="flex justify-between"><span>Basic Pay</span><span className="font-semibold">₹35,000.00</span></div>
-                <div className="flex justify-between"><span>House Rent Allowance (HRA)</span><span className="font-semibold">₹12,000.00</span></div>
-                <div className="flex justify-between"><span>Conveyance Allowance</span><span className="font-semibold">₹3,000.00</span></div>
-                <div className="flex justify-between"><span>Special Allowance</span><span className="font-semibold">₹5,000.00</span></div>
-                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Gross Earnings</span><span>₹55,000.00</span></div>
+                <div className="flex justify-between"><span>Basic Pay</span><span className="font-semibold">{basicPayStr}</span></div>
+                <div className="flex justify-between"><span>Session Incentive</span><span className="font-semibold">{incentiveStr}</span></div>
+                <div className="flex justify-between"><span>Unused Leaves Bonus</span><span className="font-semibold">{bonusStr}</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Gross Earnings</span><span>{grossEarningsStr}</span></div>
               </div>
             </div>
             {/* Deductions */}
             <div className="mt-4 sm:mt-0">
               <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Deductions</h4>
               <div className="space-y-1.5">
-                <div className="flex justify-between"><span>Provident Fund (PF)</span><span className="font-semibold">₹1,800.00</span></div>
-                <div className="flex justify-between"><span>Professional Tax</span><span className="font-semibold">₹200.00</span></div>
-                <div className="flex justify-between"><span>TDS / Income Tax</span><span className="font-semibold">₹0.00</span></div>
-                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Total Deductions</span><span>₹2,000.00</span></div>
+                <div className="flex justify-between"><span>Extra Leaves Deduction</span><span className="font-semibold">{deductionsStr}</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Total Deductions</span><span>{deductionsStr}</span></div>
               </div>
             </div>
           </div>
@@ -3652,9 +4518,9 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div className="text-center sm:text-left mb-2 sm:mb-0">
               <span className="block text-[10px] text-slate-500 uppercase font-black">Net Salary Payable</span>
-              <span className="text-lg font-black text-slate-950">₹53,000.00</span>
+              <span className="text-lg font-black text-slate-950">{netSalaryStr}</span>
             </div>
-            <p className="text-slate-600 font-bold text-[10px] text-center sm:text-right">Rupees Fifty-Three Thousand Only</p>
+            <p className="text-slate-600 font-bold text-[10px] text-center sm:text-right">{netWords}</p>
           </div>
 
           {/* Signatures */}
@@ -3682,44 +4548,49 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
           <p className="text-body-sm text-on-surface-variant">View and download your monthly payroll records.</p>
         </div>
 
-        {/* Professional Table List View */}
-        <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
-          <table className="w-full text-left border-collapse text-sm text-on-surface">
-            <thead className="bg-surface-container-high border-b border-outline-variant/40">
-              <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
-                <th className="p-4">Period</th>
-                <th className="p-4">Company</th>
-                <th className="p-4">Basic Pay</th>
-                <th className="p-4">Gross Earnings</th>
-                <th className="p-4">Net Salary</th>
-                <th className="p-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
-              {slips.map((s) => (
-                <tr key={`${s.month}-${s.year}`} className="hover:bg-surface-container-low/20 transition-colors">
-                  <td className="p-4 font-bold text-primary">
-                    {s.month} {s.year}
-                  </td>
-                  <td className="p-4 text-on-surface-variant text-xs font-semibold">
-                    Recharge Rehabilitation Pvt Ltd
-                  </td>
-                  <td className="p-4 font-semibold">{s.basic}</td>
-                  <td className="p-4 font-semibold">{s.gross}</td>
-                  <td className="p-4 font-bold text-[#027A48]">{s.net}</td>
-                  <td className="p-4 text-right">
-                    <button
-                      onClick={() => setSelectedSlip(s)}
-                      className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer"
-                    >
-                      View Payslip
-                    </button>
-                  </td>
+        {loading ? (
+          <p className="text-body-md text-on-surface-variant italic">Loading salary slip records...</p>
+        ) : slips.length === 0 ? (
+          <p className="text-body-md text-on-surface-variant italic">No finalized salary slips posted by the admin yet.</p>
+        ) : (
+          <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
+            <table className="w-full text-left border-collapse text-sm text-on-surface">
+              <thead className="bg-surface-container-high border-b border-outline-variant/40">
+                <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
+                  <th className="p-4">Period</th>
+                  <th className="p-4">Company</th>
+                  <th className="p-4">Basic Pay</th>
+                  <th className="p-4">Total Deductions</th>
+                  <th className="p-4">Net Salary</th>
+                  <th className="p-4 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
+                {slips.map((s) => (
+                  <tr key={s.id} className="hover:bg-surface-container-low/20 transition-colors">
+                    <td className="p-4 font-bold text-primary">
+                      {getMonthName(s.month)}
+                    </td>
+                    <td className="p-4 text-on-surface-variant text-xs font-semibold">
+                      Recharge Rehabilitation Pvt Ltd
+                    </td>
+                    <td className="p-4 font-semibold">₹{s.baseSalary.toLocaleString('en-IN')}</td>
+                    <td className="p-4 font-semibold text-[#B42318]">₹{s.deductions.toLocaleString('en-IN')}</td>
+                    <td className="p-4 font-bold text-[#027A48]">₹{s.netSalary.toLocaleString('en-IN')}</td>
+                    <td className="p-4 text-right">
+                      <button
+                        onClick={() => setSelectedSlip(s)}
+                        className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer"
+                      >
+                        View Payslip
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

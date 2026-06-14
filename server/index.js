@@ -48,6 +48,7 @@ const toUser = (r) => ({
   address: r.address, extraPhone: r.extra_phone,
   education10th: r.education_10th, education12th: r.education_12th, educationGrad: r.education_grad,
   isFirstJob: r.is_first_job, pastExperience: r.past_experience,
+  baseSalary: r.base_salary,
 });
 const toBlocked = (r) => ({ id: r.id, date: r.date, time: r.time, staffId: r.staff_id, reason: r.reason, source: r.source });
 
@@ -64,6 +65,7 @@ const PROFILE_COLS = {
   address: 'address', extraPhone: 'extra_phone',
   education10th: 'education_10th', education12th: 'education_12th', educationGrad: 'education_grad',
   isFirstJob: 'is_first_job', pastExperience: 'past_experience',
+  baseSalary: 'base_salary',
 };
 
 async function resolveUser(token) {
@@ -107,6 +109,52 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS education_grad TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_first_job BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS past_experience TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS base_salary INTEGER DEFAULT 35000`);
+  await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS base_salary INTEGER DEFAULT 35000`);
+
+  // Create global_settings table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS global_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
+  // Seed default settings
+  const seedSettings = [
+    ['salary_incentive_tier1_sessions', '150'],
+    ['salary_incentive_tier1_amount', '5000'],
+    ['salary_incentive_tier2_sessions', '180'],
+    ['salary_incentive_tier2_amount', '10000'],
+    ['salary_incentive_tier3_sessions', '210'],
+    ['salary_incentive_tier3_amount', '15000'],
+    ['salary_base_paid_leaves', '2'],
+    ['salary_extra_leave_deduction', '1000'],
+    ['salary_unused_leave_bonus', '2000']
+  ];
+  for (const [k, v] of seedSettings) {
+    await pool.query(
+      `INSERT INTO global_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+      [k, v]
+    );
+  }
+
+  // Create salary_slips table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS salary_slips (
+      id             TEXT PRIMARY KEY,
+      user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      month          TEXT NOT NULL,
+      base_salary    INTEGER NOT NULL,
+      sessions_count INTEGER NOT NULL,
+      incentive      INTEGER NOT NULL,
+      leaves_count   INTEGER NOT NULL,
+      deductions     INTEGER NOT NULL,
+      bonus          INTEGER NOT NULL,
+      net_salary     INTEGER NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
 
   // Create leave_requests table
   await pool.query(`
@@ -333,7 +381,13 @@ async function applyCsvAvailability(date, entries) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
+    const staffIdsToClear = Array.from(new Set(rows.map(r => r.staffId)));
+    if (staffIdsToClear.length > 0) {
+      await client.query(
+        `DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv' AND staff_id = ANY($2::text[])`,
+        [date, staffIdsToClear]
+      );
+    }
     for (const r of rows) {
       await client.query(
         `INSERT INTO blocked_slots (id, date, time, staff_id, reason, source)
@@ -564,6 +618,176 @@ async function getTodayAttendance(user) {
   };
 }
 
+async function calculateEmployeeSalary(userId, month) {
+  // month is 'yyyy-mm' (e.g. '2026-06')
+  const { rows: userRows } = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+  const user = userRows[0];
+  if (!user) throw httpErr(404, 'User not found');
+
+  const baseSalary = user.base_salary || 35000;
+
+  // Get settings
+  const { rows: settingRows } = await pool.query('SELECT * FROM global_settings');
+  const settings = {};
+  settingRows.forEach(r => settings[r.key] = parseInt(r.value, 10));
+
+  const tier1Sessions = settings.salary_incentive_tier1_sessions ?? 150;
+  const tier1Amount = settings.salary_incentive_tier1_amount ?? 5000;
+  const tier2Sessions = settings.salary_incentive_tier2_sessions ?? 180;
+  const tier2Amount = settings.salary_incentive_tier2_amount ?? 10000;
+  const tier3Sessions = settings.salary_incentive_tier3_sessions ?? 210;
+  const tier3Amount = settings.salary_incentive_tier3_amount ?? 15000;
+  const basePaidLeaves = settings.salary_base_paid_leaves ?? 2;
+  const extraLeaveDeduction = settings.salary_extra_leave_deduction ?? 1000;
+  const unusedLeaveBonus = settings.salary_unused_leave_bonus ?? 2000;
+
+  // 1. Get completed sessions in this month
+  // Confirmed/completed/requested bookings + daily CSV blocks
+  const bookingsRes = await pool.query(
+    `SELECT id, date, slot, parent_name, session_type, mode FROM bookings 
+     WHERE specialist_id = $1 AND SUBSTRING(date, 1, 7) = $2 AND status != 'cancelled'
+     ORDER BY date, slot`,
+    [userId, month]
+  );
+  
+  const csvBlocksRes = await pool.query(
+    `SELECT id, date, time as slot, reason as parent_name, 'CSV Block' as session_type, 'clinic' as mode FROM blocked_slots 
+     WHERE staff_id = $1 AND SUBSTRING(date, 1, 7) = $2 AND source = 'csv'
+     ORDER BY date, time`,
+    [userId, month]
+  );
+
+  const seenSlots = new Set();
+  const sessions = [];
+
+  // Add bookings first (they take precedence)
+  bookingsRes.rows.forEach(r => {
+    const key = `${r.date}|${r.slot}`;
+    seenSlots.add(key);
+    sessions.push({
+      id: r.id,
+      date: r.date,
+      slot: r.slot,
+      childName: r.parent_name,
+      type: r.session_type,
+      mode: r.mode,
+      source: 'booking'
+    });
+  });
+
+  // Add CSV blocks only if there is no booking overriding it
+  csvBlocksRes.rows.forEach(r => {
+    const key = `${r.date}|${r.slot}`;
+    if (!seenSlots.has(key)) {
+      seenSlots.add(key);
+      sessions.push({
+        id: r.id,
+        date: r.date,
+        slot: r.slot,
+        childName: r.parent_name,
+        type: r.session_type,
+        mode: r.mode,
+        source: 'csv'
+      });
+    }
+  });
+
+  sessions.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
+  const sessionsCount = sessions.length;
+
+  // Calculate incentive
+  let incentive = 0;
+  if (sessionsCount >= tier3Sessions) {
+    incentive = tier3Amount;
+  } else if (sessionsCount >= tier2Sessions) {
+    incentive = tier2Amount;
+  } else if (sessionsCount >= tier1Sessions) {
+    incentive = tier1Amount;
+  }
+
+  // 2. Calculate leaves
+  const { rows: leaves } = await pool.query(
+    `SELECT * FROM leave_requests WHERE user_id = $1 AND status = 'approved'`,
+    [userId]
+  );
+
+  const isLeaveDay = (dateStr) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return leaves.some(l => {
+      const s = new Date(l.start_date + 'T00:00:00');
+      const e = new Date(l.end_date + 'T00:00:00');
+      return d >= s && d <= e;
+    });
+  };
+
+  const [year, monthStr] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthStr, 0).getDate();
+
+  const leaveDates = new Set();
+  let approvedLeavesCount = 0;
+  let sandwichLeavesCount = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayStr = `${month}-${String(d).padStart(2, '0')}`;
+    const currentDay = new Date(dayStr + 'T00:00:00');
+    
+    if (isLeaveDay(dayStr)) {
+      leaveDates.add(dayStr);
+      approvedLeavesCount++;
+    } else if (currentDay.getDay() === 0) { // Sunday
+      const prevDay = new Date(currentDay.getTime() - 86400000).toISOString().slice(0, 10);
+      const nextDay = new Date(currentDay.getTime() + 86400000).toISOString().slice(0, 10);
+      
+      if (isLeaveDay(prevDay) && isLeaveDay(nextDay)) {
+        leaveDates.add(dayStr);
+        sandwichLeavesCount++;
+      }
+    }
+  }
+
+  const totalLeaves = leaveDates.size;
+
+  // Calculate deductions and bonuses
+  let deductions = 0;
+  let bonus = 0;
+
+  if (totalLeaves > basePaidLeaves) {
+    deductions = (totalLeaves - basePaidLeaves) * extraLeaveDeduction;
+  } else {
+    const valuePerUnusedLeave = Math.floor(unusedLeaveBonus / basePaidLeaves);
+    bonus = Math.max(0, basePaidLeaves - totalLeaves) * valuePerUnusedLeave;
+  }
+
+  const netSalary = baseSalary + incentive - deductions + bonus;
+
+  return {
+    userId,
+    employeeName: user.name,
+    month,
+    baseSalary,
+    sessionsCount,
+    incentive,
+    approvedLeavesCount,
+    sandwichLeavesCount,
+    totalLeaves,
+    deductions,
+    bonus,
+    netSalary,
+    sessions,
+    settings: {
+      tier1Sessions,
+      tier1Amount,
+      tier2Sessions,
+      tier2Amount,
+      tier3Sessions,
+      tier3Amount,
+      basePaidLeaves,
+      extraLeaveDeduction,
+      unusedLeaveBonus
+    }
+  };
+}
+
 // ---- router ----------------------------------------------------------------
 async function route(action, payload, token) {
   // public
@@ -586,6 +810,72 @@ async function route(action, payload, token) {
     case 'logout': await pool.query('DELETE FROM sessions WHERE token = $1', [token]); return { ok: true };
     case 'updateMyProfile': return updateMyProfile(user, payload);
     case 'listMySessions': return listMySessions(user);
+
+    case 'getSalarySettings': {
+      adminOnly();
+      const { rows } = await pool.query('SELECT * FROM global_settings');
+      const settings = {};
+      rows.forEach(r => settings[r.key] = r.value);
+      return settings;
+    }
+    case 'updateSalarySettings': {
+      superOnly();
+      const settings = payload || {};
+      for (const [k, v] of Object.entries(settings)) {
+        await pool.query(
+          `INSERT INTO global_settings (key, value) VALUES ($1, $2)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+          [k, String(v)]
+        );
+      }
+      return { ok: true };
+    }
+    case 'calculateSalary': {
+      const targetUserId = payload.userId || user.id;
+      if (targetUserId !== user.id) adminOnly();
+      return calculateEmployeeSalary(targetUserId, payload.month);
+    }
+    case 'postSalarySlip': {
+      superOnly();
+      const { userId: targetUserId, month, baseSalary, sessionsCount, incentive, totalLeaves, deductions, bonus, netSalary } = payload || {};
+      if (!targetUserId || !month) throw httpErr(400, 'Missing user or month');
+      const id = `${targetUserId}|${month}`;
+      await pool.query(
+        `INSERT INTO salary_slips (id, user_id, month, base_salary, sessions_count, incentive, leaves_count, deductions, bonus, net_salary)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO UPDATE SET 
+           base_salary = EXCLUDED.base_salary,
+           sessions_count = EXCLUDED.sessions_count,
+           incentive = EXCLUDED.incentive,
+           leaves_count = EXCLUDED.leaves_count,
+           deductions = EXCLUDED.deductions,
+           bonus = EXCLUDED.bonus,
+           net_salary = EXCLUDED.net_salary`,
+        [id, targetUserId, month, baseSalary, sessionsCount, incentive, totalLeaves, deductions, bonus, netSalary]
+      );
+      return { id };
+    }
+    case 'listSalarySlips': {
+      const targetUserId = payload.userId || user.id;
+      if (targetUserId !== user.id) adminOnly();
+      const { rows } = await pool.query(
+        `SELECT * FROM salary_slips WHERE user_id = $1 ORDER BY month DESC`,
+        [targetUserId]
+      );
+      return rows.map(r => ({
+        id: r.id,
+        userId: r.user_id,
+        month: r.month,
+        baseSalary: r.base_salary,
+        sessionsCount: r.sessions_count,
+        incentive: r.incentive,
+        leavesCount: r.leaves_count,
+        deductions: r.deductions,
+        bonus: r.bonus,
+        netSalary: r.net_salary,
+        createdAt: r.created_at
+      }));
+    }
     case 'resetMyPassword': return resetMyPassword(user, payload);
     case 'applyLeave': return applyLeave(user, payload);
     case 'listMyLeaves': return listMyLeaves(user);
