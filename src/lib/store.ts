@@ -10,9 +10,9 @@
  * Protocol: POST { action, token, payload } → { ok, result }.
  */
 
-export type BookingStatus = 'requested' | 'confirmed' | 'cancelled' | 'completed';
+export type BookingStatus = 'requested' | 'confirmed' | 'cancelled' | 'completed' | 'Blocked';
 export type PaymentStatus = 'pending' | 'paid_online' | 'pay_on_visit' | 'waived';
-export type BookingSource = 'booking' | 'consultation';
+export type BookingSource = 'booking' | 'consultation' | 'blocked';
 export type SessionMode = 'online' | 'clinic';
 export type Role = 'super_admin' | 'admin' | 'employee';
 
@@ -89,12 +89,16 @@ export interface DayAvailability {
 export interface CsvAvailabilityEntry {
   identifier: string; // employee login id or name as written in the sheet
   times: string[]; // canonical 'HH:mm' values (already expanded for full-day)
+  reasons?: Record<string, string>; // child name or block reason mapping
 }
 
 export type NewBooking = Omit<BookingRequest, 'id' | 'status' | 'payment' | 'seen' | 'requestedAt' | 'updatedAt'>;
 
 // --- scheduling constants ---------------------------------------------------
-export const SLOT_TIMES = ['10:00', '10:45', '11:30', '12:15', '13:00', '13:45', '14:30', '15:15', '16:00', '16:45'];
+export const SLOT_TIMES = [
+  '10:00', '10:45', '11:30', '12:15', '13:00', // Morning Slots
+  '14:00', '14:45', '15:30', '16:15', '17:00'  // Afternoon Slots (1:45-2:00 is lunch break)
+];
 
 export const formatSlot = (t: string): string => {
   const [h, m] = t.split(':').map(Number);
@@ -136,17 +140,25 @@ export const normalizeSlotTime = (raw: string): string | null => {
 
 /**
  * Parse the admin's daily availability CSV into per-employee busy times.
- * Layout (header row optional):  employee, time, time, …
- *   e1, 10:00, 10:45 11:30          → e1 busy at those three slots
- *   Employee 3, all                 → Employee 3 unavailable all day
- * The first cell is the employee (login id OR name); the rest are times (comma,
- * space or semicolon separated). 'all'/'off'/'leave' = the whole day.
- * Returns the entries plus any unrecognised time tokens (for a warning).
+ * Supports:
+ * 1. Multi-column format where each therapist has a column adjacent to a TIMESLOTS column.
+ * 2. Classic row-by-row format (employee, time, time, ...).
  */
 export function parseAvailabilityCsv(text: string): { entries: CsvAvailabilityEntry[]; badTimes: string[] } {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = lines.map((line) => line.split(',').map((c) => c.trim()));
+
+  // Detect if this is the new multi-column format (paired columns of [Therapist, TIMESLOTS])
+  const isMultiColumnFormat = rows.length >= 3 && 
+    rows[2].some((c) => c.toUpperCase() === 'TIMESLOTS') &&
+    rows[1].some((c) => c.includes('(') && c.includes(')'));
+
+  if (isMultiColumnFormat) {
+    return parseMultiColumnCsv(rows);
+  }
+
   const entries: CsvAvailabilityEntry[] = [];
   const badTimes: string[] = [];
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
     const cells = line.split(',').map((c) => c.trim()).filter((c, i) => i === 0 || c.length > 0);
     const identifier = cells[0];
@@ -173,6 +185,150 @@ export function parseAvailabilityCsv(text: string): { entries: CsvAvailabilityEn
     if (times.size === 0 && !fullDay) continue;
     entries.push({ identifier, times: SLOT_TIMES.filter((t) => times.has(t)) });
   }
+  return { entries, badTimes };
+}
+
+function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[]; badTimes: string[] } {
+  const entries: CsvAvailabilityEntry[] = [];
+  const badTimes: string[] = [];
+
+  // Extract therapist names and timeslots from Row 3 (index 2)
+  const headers = rows[2];
+  const therapistColumns: { name: string; colIdx: number; timeSlotColIdx: number }[] = [];
+
+  for (let i = 0; i < headers.length; i++) {
+    const name = headers[i];
+    if (!name) continue;
+    
+    const cleanHeader = name.toUpperCase();
+    if (cleanHeader === 'TIMESLOTS' || cleanHeader === 'S.NO' || cleanHeader.startsWith('CANCELLATION')) {
+      continue;
+    }
+
+    // Find the nearest TIMESLOTS column
+    let timeSlotColIdx = -1;
+    if (headers[i + 1] && headers[i + 1].toUpperCase() === 'TIMESLOTS') {
+      timeSlotColIdx = i + 1;
+    } else {
+      for (let j = 1; j <= 2; j++) {
+        if (headers[i + j] && headers[i + j].toUpperCase() === 'TIMESLOTS') {
+          timeSlotColIdx = i + j;
+          break;
+        }
+      }
+    }
+
+    if (timeSlotColIdx !== -1) {
+      therapistColumns.push({ name, colIdx: i, timeSlotColIdx });
+    }
+  }
+
+  // Map to store times and reasons per therapist
+  const therapistData = new Map<string, { times: Set<string>; reasons: Record<string, string> }>();
+
+  // Parse top table rows starting from Row 4 (index 3) until we hit the lower table header
+  let lowerTableHeaderRowIdx = -1;
+  for (let r = 3; r < rows.length; r++) {
+    if (rows[r] && rows[r][0] && rows[r][0].toUpperCase() === 'TIMESLOTS') {
+      lowerTableHeaderRowIdx = r;
+      break;
+    }
+  }
+
+  const endTopIdx = lowerTableHeaderRowIdx !== -1 ? lowerTableHeaderRowIdx : rows.length;
+
+  for (let rowIdx = 3; rowIdx < endTopIdx; rowIdx++) {
+    const row = rows[rowIdx];
+    if (!row || row.length === 0) continue;
+
+    for (const col of therapistColumns) {
+      const timeslotText = row[col.timeSlotColIdx];
+      if (!timeslotText) continue;
+
+      // Extract start time, e.g. "10:00" from "10:00-10:45"
+      const startMatch = timeslotText.match(/^(\d{1,2}:\d{2})/);
+      if (!startMatch) continue;
+
+      const startTimeRaw = startMatch[1];
+      const [hStr, mStr] = startTimeRaw.split(':');
+      let h = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
+      
+      // Convert PM slots (1:00 PM to 5:00 PM)
+      if (h >= 1 && h < 10) {
+        h += 12;
+      }
+      const canonicalTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+      // Check cell value for client name or block reason
+      const cellVal = row[col.colIdx]?.trim();
+      if (cellVal && cellVal.length > 0) {
+        if (!therapistData.has(col.name)) {
+          therapistData.set(col.name, { times: new Set(), reasons: {} });
+        }
+        const data = therapistData.get(col.name)!;
+        data.times.add(canonicalTime);
+        data.reasons[canonicalTime] = cellVal;
+      }
+    }
+  }
+
+  // Parse lower table (for educators like SHIKHA, SANIYA, KUMKUM)
+  if (lowerTableHeaderRowIdx !== -1) {
+    const timeSlotsRow = rows[lowerTableHeaderRowIdx];
+    const columnTimes: { [colIdx: number]: string } = {};
+
+    for (let c = 1; c < timeSlotsRow.length; c++) {
+      const slotText = timeSlotsRow[c];
+      if (!slotText) continue;
+      const startMatch = slotText.match(/^(\d{1,2}:\d{2})/);
+      if (startMatch) {
+        const startTimeRaw = startMatch[1];
+        const [hStr, mStr] = startTimeRaw.split(':');
+        let h = parseInt(hStr, 10);
+        const m = parseInt(mStr, 10);
+        if (h >= 1 && h < 10) h += 12;
+        const canonicalTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        if (SLOT_TIMES.includes(canonicalTime)) {
+          columnTimes[c] = canonicalTime;
+        }
+      }
+    }
+
+    for (let r = lowerTableHeaderRowIdx + 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || row.length === 0) continue;
+
+      const therapistName = row[0]?.trim();
+      if (!therapistName || therapistName.toUpperCase().startsWith('GROUP')) {
+        continue;
+      }
+
+      for (let c = 1; c < row.length; c++) {
+        const canonicalTime = columnTimes[c];
+        if (!canonicalTime) continue;
+
+        const cellVal = row[c]?.trim();
+        if (cellVal && cellVal.length > 0) {
+          if (!therapistData.has(therapistName)) {
+            therapistData.set(therapistName, { times: new Set(), reasons: {} });
+          }
+          const data = therapistData.get(therapistName)!;
+          data.times.add(canonicalTime);
+          data.reasons[canonicalTime] = cellVal;
+        }
+      }
+    }
+  }
+
+  for (const [name, data] of therapistData.entries()) {
+    entries.push({
+      identifier: name,
+      times: SLOT_TIMES.filter((t) => data.times.has(t)),
+      reasons: data.reasons
+    });
+  }
+
   return { entries, badTimes };
 }
 

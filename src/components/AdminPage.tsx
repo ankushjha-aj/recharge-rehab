@@ -106,13 +106,14 @@ const FlyingBird: React.FC<{
   );
 };
 
-type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'sessions' | 'profile' | 'salary' | 'offer_letter' | 'leaves' | 'reset_password';
+type Tab = 'requests' | 'employees' | 'availability' | 'payments' | 'database' | 'dashboard' | 'sessions' | 'profile' | 'salary' | 'offer_letter' | 'leaves' | 'reset_password';
 
 const STATUS_META: Record<BookingStatus, { label: string; cls: string }> = {
   requested: { label: 'Requested', cls: 'bg-primary-fixed text-primary' },
   confirmed: { label: 'Confirmed', cls: 'bg-[#D1FADF] text-[#027A48]' },
   cancelled: { label: 'Cancelled', cls: 'bg-[#FEE4E2] text-[#B42318]' },
   completed: { label: 'Completed', cls: 'bg-surface-container-high text-on-surface-variant' },
+  Blocked: { label: 'Blocked Slot', cls: 'bg-[#FEF0C7] text-[#B54708]' },
 };
 const PAYMENT_META: Record<PaymentStatus, { label: string; cls: string }> = {
   pending: { label: 'Pending', cls: 'bg-[#FEF0C7] text-[#B54708]' },
@@ -652,7 +653,7 @@ const LoginForm: React.FC<{ onLoggedIn: (u: User) => void; isEmployeePath: boole
 const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, onLogout }) => {
   const isSuper = user.role === 'super_admin';
   const [tab, setTab] = useState<Tab>(() => {
-    return user.role === 'employee' ? 'sessions' : 'requests';
+    return user.role === 'employee' ? 'dashboard' : 'requests';
   });
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -667,32 +668,6 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
   const [allLeaves, setAllLeaves] = useState<LeaveRequest[]>([]);
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
 
-  const [profileForm, setProfileForm] = useState(() => {
-    const parseJson = (str: any) => {
-      try { return str ? JSON.parse(str) : null; } catch { return null; }
-    };
-    return {
-      name: user.name,
-      gender: user.gender || '',
-      qualifications: user.qualifications || '',
-      experience: user.experience || '',
-      email: user.email || '',
-      phone: user.phone || '',
-      profileImage: user.profileImage || '',
-      parentName: user.parentName || '',
-      parentRelation: user.parentRelation || '',
-      parentPhone: user.parentPhone || '',
-      address: user.address || '',
-      extraPhone: user.extraPhone || '',
-      isFirstJob: !!user.isFirstJob,
-      education10th: parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' },
-      education12th: parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' },
-      educationGrad: parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' },
-      pastExperience: parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' },
-    };
-  });
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileSavedAt, setProfileSavedAt] = useState('');
 
   // Status state initialized from localStorage
   const [status, setStatusState] = useState<'online' | 'offline' | 'lunch'>(() => {
@@ -759,6 +734,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
   const tabs = useMemo(() => {
     if (user.role === 'employee') {
       return [
+        { id: 'dashboard' as Tab, label: 'Dashboard', icon: 'dashboard' },
         { id: 'sessions' as Tab, label: 'Sessions', icon: 'today' },
         { id: 'profile' as Tab, label: 'My Profile', icon: 'person' },
         { id: 'reset_password' as Tab, label: 'Reset Password', icon: 'lock_reset' },
@@ -1080,32 +1056,14 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ user, 
           {tab === 'availability' && <AvailabilityTab users={users} />}
           {tab === 'payments' && <PaymentsTab bookings={bookings} onChange={refresh} />}
           {tab === 'database' && <DatabaseTab />}
+          {tab === 'dashboard' && <EmployeeDashboardTab user={meUser} sessions={mySessions} />}
           {tab === 'sessions' && <EmployeeSessionsTab sessions={mySessions} />}
           {tab === 'profile' && (
             <EmployeeProfileTab
-              form={profileForm}
-              setForm={setProfileForm}
-              saving={profileSaving}
-              savedAt={profileSavedAt}
-              onSave={async (e) => {
-                e.preventDefault();
-                setProfileSaving(true);
-                try {
-                  const payload = {
-                    ...profileForm,
-                    education10th: JSON.stringify(profileForm.education10th),
-                    education12th: JSON.stringify(profileForm.education12th),
-                    educationGrad: JSON.stringify(profileForm.educationGrad),
-                    pastExperience: JSON.stringify(profileForm.pastExperience),
-                  };
-                  const updated = await updateMyProfile(payload);
-                  setMeUser(updated);
-                  setProfileSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
-                } catch (err) {
-                  alert(err instanceof Error ? err.message : 'Failed to save');
-                } finally {
-                  setProfileSaving(false);
-                }
+              user={meUser}
+              onSave={async (payload) => {
+                const updated = await updateMyProfile(payload);
+                setMeUser(updated);
               }}
             />
           )}
@@ -1306,13 +1264,24 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-2xl bg-surface-container-lowest border border-outline-variant rounded-[2rem] p-6 shadow-2xl relative animate-drop-down-spring max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {/* Close button at top right */}
-        <button
-          onClick={onClose}
-          className="absolute top-5 right-5 text-on-surface-variant hover:text-primary hover:bg-surface-container-high/40 p-1.5 rounded-full transition-all active:scale-90"
-        >
-          <span className="material-symbols-outlined text-[20px]">close</span>
-        </button>
+        {/* Actions at top right */}
+        <div className="absolute top-5 right-5 flex items-center gap-2 print-hide">
+          <button
+            onClick={() => printDocument('admin-user-profile-print')}
+            className="text-on-surface-variant hover:text-primary hover:bg-surface-container-high/40 p-1.5 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            title="Print Profile"
+          >
+            <span className="material-symbols-outlined text-[20px]">print</span>
+          </button>
+          <button
+            onClick={onClose}
+            className="text-on-surface-variant hover:text-primary hover:bg-surface-container-high/40 p-1.5 rounded-full transition-all active:scale-90 flex items-center justify-center cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[20px]">close</span>
+          </button>
+        </div>
+
+        <div id="admin-user-profile-print" className="space-y-6 text-on-surface bg-transparent">
 
         {/* Header Section */}
         <div className="flex items-center gap-4 mb-6">
@@ -1484,6 +1453,7 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
               </div>
             )}
           </div>
+        </div>
         </div>
 
         {/* Footer Actions */}
@@ -2375,41 +2345,313 @@ const DatabaseTab: React.FC = () => {
 // ---------------------------------------------------------------------------
 // Employee — Sessions view
 // ---------------------------------------------------------------------------
-const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ sessions }) => {
+// ---------------------------------------------------------------------------
+// Employee — Dashboard view
+// ---------------------------------------------------------------------------
+const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }> = ({ user, sessions }) => {
   const today = todayISO();
-  const todays = useMemo(() => sessions.filter((s) => s.date === today), [sessions, today]);
-  const upcoming = useMemo(() => sessions.filter((s) => s.date && s.date > today), [sessions, today]);
 
-  const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => (
-    <div className="flex items-center justify-between gap-3 bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3">
-      <div className="min-w-0">
-        <p className="font-bold text-on-surface text-sm truncate">{s.parentName || 'Client'} · {s.sessionType}</p>
-        <p className="text-body-sm text-on-surface-variant">{s.mode === 'online' ? 'Online' : 'In-Clinic'} · {s.slot ? formatSlot(s.slot) : 'time TBD'}{s.date ? ` · ${s.date}` : ''}</p>
-      </div>
-      <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary-fixed text-primary shrink-0">{s.status}</span>
-    </div>
-  );
+  const todays = useMemo(() => sessions.filter((s) => s.date === today), [sessions, today]);
+  const clientSessions = useMemo(() => todays.filter((s) => s.source !== 'blocked'), [todays]);
+  const blockedSessions = useMemo(() => todays.filter((s) => s.source === 'blocked'), [todays]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm">
-        <h2 className="text-headline-sm font-bold text-on-surface mb-3 flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">today</span>Today's sessions
-        </h2>
+    <div className="space-y-6 w-full max-w-7xl mx-auto">
+      {/* Welcome Card */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
+        <div>
+          <h2 className="text-headline-md font-black text-on-surface">Hello, {user.name || 'Staff Member'}!</h2>
+          <p className="text-body-sm text-on-surface-variant mt-1.5">
+            Welcome to your dashboard. Here is an overview of your schedule and availability for today, <strong className="text-primary">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.
+          </p>
+        </div>
+        <div className="flex gap-4 shrink-0 flex-wrap">
+          <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3 text-center min-w-[120px]">
+            <span className="block text-[10px] uppercase font-black tracking-wider text-primary">Client Sessions</span>
+            <span className="text-2xl font-black text-primary">{clientSessions.length}</span>
+          </div>
+          <div className="bg-[#FEF0C7] border border-[#FDE293] rounded-2xl px-5 py-3 text-center min-w-[120px]">
+            <span className="block text-[10px] uppercase font-black tracking-wider text-[#B54708]">Blocked Slots</span>
+            <span className="text-2xl font-black text-[#B54708]">{blockedSessions.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Today View */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm">
+        <h3 className="text-title-large font-bold text-on-surface mb-4 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
+          <span className="material-symbols-outlined text-primary">today</span>
+          Today's Schedule Detail
+        </h3>
+
         {todays.length === 0 ? (
-          <p className="text-body-sm text-on-surface-variant italic">No sessions assigned for today.</p>
+          <div className="text-center py-12 border border-dashed border-outline-variant/60 rounded-2xl">
+            <span className="material-symbols-outlined text-[48px] text-on-surface-variant/30 mb-2">event_busy</span>
+            <p className="text-body-md text-on-surface-variant italic font-semibold">No active sessions or blocked slots scheduled for today.</p>
+          </div>
         ) : (
-          <div className="space-y-2">{todays.map((s) => <SessionRow key={s.id} s={s} />)}</div>
+          <div className="space-y-3">
+            {todays.map((s) => {
+              const isBlocked = s.source === 'blocked';
+              return (
+                <div
+                  key={s.id}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border rounded-2xl p-4 transition-all hover:shadow-sm ${
+                    isBlocked
+                      ? 'bg-[#FEF0C7]/20 border-[#FDE293] text-on-surface'
+                      : 'bg-surface-container-lowest border-outline-variant text-on-surface'
+                  }`}
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                        isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[20px]">
+                        {isBlocked ? 'block' : s.mode === 'online' ? 'laptop_mac' : 'home_clinic'}
+                      </span>
+                    </div>
+                    <div>
+                      {isBlocked ? (
+                        <div>
+                          <p className="font-extrabold text-[#B54708] text-sm flex items-center gap-1.5 flex-wrap">
+                            <span>Blocked Slot: {s.parentName}</span>
+                            <span className="text-[10px] px-2 py-0.5 bg-[#FEF0C7] text-[#B54708] rounded-full uppercase tracking-wider font-extrabold border border-[#FDE293]">
+                              {s.sessionType}
+                            </span>
+                          </p>
+                          <p className="text-xs text-on-surface-variant/80 mt-1">
+                            This time slot has been blocked for you by the Admin. No public bookings can be placed here.
+                          </p>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="font-extrabold text-on-surface text-sm">
+                            Client: {s.parentName || 'Client'} · <span className="text-primary">{s.sessionType}</span>
+                          </p>
+                          <p className="text-xs text-on-surface-variant/80 mt-1 font-semibold">
+                            {s.mode === 'online' ? 'Online Session' : 'In-Clinic Session'}
+                          </p>
+                        </div>
+                      )}
+                      <p className="text-[11px] font-bold text-on-surface-variant mt-1.5 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px]">schedule</span>
+                        Time: {formatSlot(s.slot)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="sm:text-right shrink-0 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 border-t sm:border-t-0 border-outline-variant/20 pt-2.5 sm:pt-0">
+                    <span
+                      className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full ${
+                        isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#027A48]'
+                      }`}
+                    >
+                      {isBlocked ? 'Blocked' : s.status}
+                    </span>
+                    {!isBlocked && (
+                      <span className="text-[10px] font-bold text-on-surface-variant">
+                        Payment: {s.payment === 'paid_online' ? 'Paid' : s.payment === 'pay_on_visit' ? 'Pay on Visit' : s.payment}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm">
-        <h2 className="text-headline-sm font-bold text-on-surface mb-3 flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">event_upcoming</span>Upcoming sessions
-        </h2>
-        {upcoming.length === 0 ? (
-          <p className="text-body-sm text-on-surface-variant italic">Nothing scheduled ahead.</p>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Employee — Sessions view
+// ---------------------------------------------------------------------------
+const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ sessions }) => {
+  const today = todayISO();
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
+  const [selectedDate, setSelectedDate] = useState<string>('');
+
+  const months = useMemo(() => {
+    const set = new Set<string>();
+    sessions.forEach((s) => {
+      if (s.date) {
+        set.add(s.date.substring(0, 7));
+      }
+    });
+    return Array.from(set).sort().reverse();
+  }, [sessions]);
+
+  const formatYearMonth = (ym: string) => {
+    if (ym === 'TBD') return 'Date TBD';
+    const [year, month] = ym.split('-');
+    const d = new Date(parseInt(year), parseInt(month) - 1, 1);
+    return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  };
+
+  const groupedSessions = useMemo(() => {
+    const filtered = sessions.filter((s) => {
+      if (selectedPeriod === 'date') {
+        return s.date === selectedDate;
+      }
+      if (selectedPeriod === 'all') return true;
+      if (selectedPeriod === 'today_upcoming') return s.date >= today;
+      if (selectedPeriod === 'past') return s.date < today;
+      return s.date && s.date.startsWith(selectedPeriod);
+    });
+
+    const groups: Record<string, BookingRequest[]> = {};
+    filtered.forEach((s) => {
+      const key = s.date ? s.date.substring(0, 7) : 'TBD';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
+
+    // Sort keys descending
+    return Object.keys(groups)
+      .sort((a, b) => b.localeCompare(a))
+      .reduce((obj, key) => {
+        obj[key] = groups[key];
+        return obj;
+      }, {} as Record<string, BookingRequest[]>);
+  }, [sessions, selectedPeriod, selectedDate, today]);
+
+  const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => {
+    const isBlocked = s.source === 'blocked';
+    const isPast = s.date && s.date < today;
+    return (
+      <div
+        className={`flex items-center justify-between gap-3 border rounded-xl px-4 py-3 transition ${
+          isBlocked
+            ? 'bg-[#FEF0C7]/10 border-[#FDE293]/60'
+            : isPast
+            ? 'bg-surface-container-low/40 border-outline-variant/20'
+            : 'bg-surface-container-lowest border-outline-variant'
+        }`}
+      >
+        <div className="min-w-0">
+          <p className="font-bold text-on-surface text-sm truncate flex items-center gap-1.5 flex-wrap">
+            <span>{s.parentName || 'Client'}</span>
+            <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+              isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
+            }`}>
+              {s.sessionType}
+            </span>
+          </p>
+          <p className="text-body-sm text-on-surface-variant">
+            {s.mode === 'online' ? 'Online' : 'In-Clinic'} · {s.slot ? formatSlot(s.slot) : 'time TBD'}
+            {s.date ? ` · ${s.date}` : ''}
+          </p>
+        </div>
+        <span
+          className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shrink-0 ${
+            isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary-fixed text-primary'
+          }`}
+        >
+          {isBlocked ? 'Blocked' : s.status}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6 w-full max-w-7xl mx-auto">
+      {/* Header and Filter panel */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">calendar_month</span>
+            My Sessions Logs
+          </h2>
+          <p className="text-body-sm text-on-surface-variant mt-1">
+            Browse and filter your history of assigned client sessions and blocked slots.
+          </p>
+        </div>
+
+        {/* Dropdown & Calendar Filters */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Calendar Picker */}
+          <div className="flex items-center gap-2 bg-surface-container-high hover:bg-surface-container-high/80 border border-outline-variant rounded-full py-1.5 px-4 text-xs font-bold text-on-surface transition focus-within:ring-2 focus-within:ring-primary/20">
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant select-none">calendar_today</span>
+            <span>Choose Date:</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => {
+                setSelectedDate(e.target.value);
+                setSelectedPeriod(e.target.value ? 'date' : 'all');
+              }}
+              className="bg-transparent text-xs text-on-surface outline-none cursor-pointer border-none p-0 focus:ring-0 w-28 font-bold"
+            />
+            {selectedDate && (
+              <button
+                onClick={() => {
+                  setSelectedDate('');
+                  setSelectedPeriod('all');
+                }}
+                className="text-on-surface-variant hover:text-primary transition p-0.5"
+                title="Clear date filter"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            )}
+          </div>
+
+          <span className="text-xs text-on-surface-variant/40 font-bold hidden sm:inline">or</span>
+
+          {/* Period Dropdown */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-on-surface-variant">Filter Period:</span>
+            <select
+              value={selectedPeriod}
+              onChange={(e) => {
+                setSelectedPeriod(e.target.value);
+                if (e.target.value !== 'date') {
+                  setSelectedDate('');
+                }
+              }}
+              className="bg-surface-container-high border border-outline-variant rounded-full py-1.5 px-4 text-xs font-bold text-on-surface outline-none cursor-pointer focus:border-primary"
+            >
+              <option value="all">All Sessions</option>
+              <option value="today_upcoming">Today & Upcoming</option>
+              <option value="past">Previous Days (History)</option>
+              <optgroup label="Previous Months">
+                {months.map((m) => (
+                  <option key={m} value={m}>
+                    {formatYearMonth(m)}
+                  </option>
+                ))}
+              </optgroup>
+              {selectedPeriod === 'date' && (
+                <option value="date" disabled>Selected Date</option>
+              )}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Grouped Month Views */}
+      <div className="space-y-6">
+        {Object.keys(groupedSessions).length === 0 ? (
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-8 text-center">
+            <p className="text-body-md text-on-surface-variant italic font-semibold">No sessions match the selected filter criteria.</p>
+          </div>
         ) : (
-          <div className="space-y-2">{upcoming.slice(0, 8).map((s) => <SessionRow key={s.id} s={s} />)}</div>
+          Object.keys(groupedSessions).map((monthKey) => (
+            <div key={monthKey} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-extrabold text-primary border-b border-outline-variant/30 pb-2 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[18px]">event</span>
+                {formatYearMonth(monthKey)}
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {groupedSessions[monthKey].map((s) => (
+                  <SessionRow key={s.id} s={s} />
+                ))}
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>
@@ -2425,6 +2667,166 @@ const handleFileToBase64 = (file: File, callback: (base64: string) => void) => {
     callback(reader.result as string);
   };
   reader.readAsDataURL(file);
+};
+
+const printDocument = (elementId: string) => {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentWindow?.document || iframe.contentDocument;
+  if (!iframeDoc) return;
+
+  // Clone current document styles (style and link tags)
+  let stylesHTML = '';
+  document.querySelectorAll('style, link[rel="stylesheet"]').forEach((style) => {
+    stylesHTML += style.outerHTML;
+  });
+
+  const clone = element.cloneNode(true) as HTMLElement;
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Print Document</title>
+  ${stylesHTML}
+  <style>
+    body {
+      background-color: #ffffff !important;
+      color: #000000 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    #offer-letter-print, #salary-slip-print, #employee-profile-print, #admin-user-profile-print {
+      border: none !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      padding: 1.5cm !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+    @media print {
+      body {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      #offer-letter-print, #salary-slip-print, #employee-profile-print, #admin-user-profile-print {
+        padding: 1.5cm !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-white">
+  <div>
+    ${clone.outerHTML}
+  </div>
+  <script>
+    window.onload = function() {
+      window.focus();
+      window.print();
+      setTimeout(() => {
+        window.frameElement.remove();
+      }, 1000);
+    };
+    if (document.readyState === 'complete') {
+      window.focus();
+      window.print();
+      setTimeout(() => {
+        window.frameElement.remove();
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
+  `;
+
+  iframeDoc.open();
+  iframeDoc.write(htmlContent);
+  iframeDoc.close();
+};
+
+const downloadDocument = (elementId: string, filename: string) => {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+  const clone = element.cloneNode(true) as HTMLElement;
+  const title = filename.replace(/\.[^/.]+$/, "");
+  const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      background-color: #f8fafc;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .download-wrapper {
+      width: 100%;
+      max-width: 800px;
+    }
+    #offer-letter-print, #salary-slip-print, #employee-profile-print, #admin-user-profile-print {
+      background: #ffffff !important;
+      color: #000000 !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 1.5rem !important;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
+      padding: 3rem !important;
+    }
+    @media print {
+      body {
+        background-color: #ffffff;
+        padding: 0;
+      }
+      .download-wrapper {
+        max-width: 100%;
+      }
+      #offer-letter-print, #salary-slip-print, #employee-profile-print, #admin-user-profile-print {
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="download-wrapper">
+    ${clone.outerHTML}
+  </div>
+</body>
+</html>
+  `;
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 };
 
 const FileUploader: React.FC<{
@@ -2548,27 +2950,348 @@ const SelfPasswordResetSection: React.FC = () => {
 // Employee — Profile edit view
 // ---------------------------------------------------------------------------
 const EmployeeProfileTab: React.FC<{
-  form: any;
-  setForm: React.Dispatch<React.SetStateAction<any>>;
-  saving: boolean;
-  savedAt: string;
-  onSave: (e: React.FormEvent) => void;
-}> = ({ form, setForm, saving, savedAt, onSave }) => {
+  user: User;
+  onSave: (updatedUser: any) => Promise<void>;
+}> = ({ user, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState('');
+
+  const parseJson = (str: any) => {
+    try { return str ? (typeof str === 'string' ? JSON.parse(str) : str) : null; } catch { return null; }
+  };
+
+  // Local form state
+  const [form, setForm] = useState(() => ({
+    name: user.name || '',
+    gender: user.gender || '',
+    qualifications: user.qualifications || '',
+    experience: user.experience || '',
+    email: user.email || '',
+    phone: user.phone || '',
+    profileImage: user.profileImage || '',
+    parentName: user.parentName || '',
+    parentRelation: user.parentRelation || '',
+    parentPhone: user.parentPhone || '',
+    address: user.address || '',
+    extraPhone: user.extraPhone || '',
+    isFirstJob: !!user.isFirstJob,
+    education10th: parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' },
+    education12th: parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' },
+    educationGrad: parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' },
+    pastExperience: parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' },
+  }));
+
+  // Synchronize local form when user changes (e.g. from props update or initial load)
+  useEffect(() => {
+    setForm({
+      name: user.name || '',
+      gender: user.gender || '',
+      qualifications: user.qualifications || '',
+      experience: user.experience || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      profileImage: user.profileImage || '',
+      parentName: user.parentName || '',
+      parentRelation: user.parentRelation || '',
+      parentPhone: user.parentPhone || '',
+      address: user.address || '',
+      extraPhone: user.extraPhone || '',
+      isFirstJob: !!user.isFirstJob,
+      education10th: parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' },
+      education12th: parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' },
+      educationGrad: parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' },
+      pastExperience: parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' },
+    });
+  }, [user]);
+
+  const handleCancel = () => {
+    // Reset to user props and exit edit mode
+    setForm({
+      name: user.name || '',
+      gender: user.gender || '',
+      qualifications: user.qualifications || '',
+      experience: user.experience || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      profileImage: user.profileImage || '',
+      parentName: user.parentName || '',
+      parentRelation: user.parentRelation || '',
+      parentPhone: user.parentPhone || '',
+      address: user.address || '',
+      extraPhone: user.extraPhone || '',
+      isFirstJob: !!user.isFirstJob,
+      education10th: parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' },
+      education12th: parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' },
+      educationGrad: parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' },
+      pastExperience: parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' },
+    });
+    setIsEditing(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        education10th: JSON.stringify(form.education10th),
+        education12th: JSON.stringify(form.education12th),
+        educationGrad: JSON.stringify(form.educationGrad),
+        pastExperience: JSON.stringify(form.pastExperience),
+      };
+      await onSave(payload);
+      setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+      setIsEditing(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isEditing) {
+    const edu10 = parseJson(user.education10th) || { school: '', year: '', grade: '', file: '' };
+    const edu12 = parseJson(user.education12th) || { school: '', year: '', grade: '', file: '' };
+    const grad = parseJson(user.educationGrad) || { degree: '', school: '', year: '', grade: '', file: '' };
+    const exp = parseJson(user.pastExperience) || { company: '', role: '', duration: '', file: '' };
+
+    return (
+      <div className="space-y-6 max-w-7xl mx-auto w-full">
+        {/* Buttons Header (not printed) */}
+        <div className="flex justify-end gap-2 flex-wrap print-hide">
+          <button
+            onClick={() => downloadDocument('employee-profile-print', `Profile_${user.name || 'Staff'}.html`)}
+            className="bg-secondary text-on-secondary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">download</span>
+            Download Profile
+          </button>
+          <button
+            onClick={() => printDocument('employee-profile-print')}
+            className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">print</span>
+            Print Profile
+          </button>
+          <button
+            onClick={() => setIsEditing(true)}
+            className="bg-surface-container-high hover:bg-surface-container-high/80 border border-outline-variant/60 text-on-surface px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">edit</span>
+            Edit Profile
+          </button>
+        </div>
+
+        {/* Profile Printable Area */}
+        <div id="employee-profile-print" className="space-y-6 bg-transparent text-on-surface">
+          {/* Profile Hero Header */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="relative w-28 h-28 rounded-full border-2 border-primary/20 overflow-hidden bg-surface-container-high/40 flex items-center justify-center shadow-inner shrink-0">
+                {user.profileImage ? (
+                  <img src={user.profileImage} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="material-symbols-outlined text-[64px] text-on-surface-variant/40">person</span>
+                )}
+              </div>
+              <div className="text-center sm:text-left space-y-1.5 flex-1">
+                <h2 className="text-headline-md font-black text-on-surface leading-tight">{user.name || 'Staff Member'}</h2>
+                <div className="flex flex-wrap justify-center sm:justify-start items-center gap-2">
+                  <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider">
+                    {user.specialty || 'Therapist'}
+                  </span>
+                  <span className="bg-surface-container-high text-on-surface-variant px-3 py-1 rounded-full text-xs font-bold">
+                    ID: {user.id}
+                  </span>
+                </div>
+                <p className="text-body-xs text-on-surface-variant">
+                  Account registered on {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+        {/* Main Info Columns */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Left Column - Details & Contact */}
+          <div className="space-y-6 md:col-span-1">
+            {/* General Information */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-2">
+                <span className="material-symbols-outlined text-primary">badge</span>
+                General Info
+              </h3>
+              <div className="space-y-3 text-sm">
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Gender</span>
+                  <span className="font-semibold text-on-surface">{user.gender || 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Qualifications</span>
+                  <span className="font-semibold text-on-surface">{user.qualifications || 'Not specified'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact Details */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-2">
+                <span className="material-symbols-outlined text-primary">contacts</span>
+                Contact Details
+              </h3>
+              <div className="space-y-3 text-sm">
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Email Address</span>
+                  <span className="font-semibold text-on-surface break-all">{user.email || 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Primary Phone</span>
+                  <span className="font-semibold text-on-surface">{user.phone ? `+91 ${user.phone}` : 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Alternative Phone</span>
+                  <span className="font-semibold text-on-surface">{user.extraPhone ? `+91 ${user.extraPhone}` : 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Residential Address</span>
+                  <span className="font-semibold text-on-surface whitespace-pre-line">{user.address || 'Not specified'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Columns - family, education, experience */}
+          <div className="space-y-6 md:col-span-2">
+            {/* Parent Info */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-2">
+                <span className="material-symbols-outlined text-primary">family_restroom</span>
+                Parent / Guardian Info
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Guardian Name</span>
+                  <span className="font-semibold text-on-surface">{user.parentName || 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Relation</span>
+                  <span className="font-semibold text-on-surface">{user.parentRelation || 'Not specified'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-wider block">Contact Number</span>
+                  <span className="font-semibold text-on-surface">{user.parentPhone ? `+91 ${user.parentPhone}` : 'Not specified'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Education Info */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-2">
+                <span className="material-symbols-outlined text-primary">school</span>
+                Education Records
+              </h3>
+              <div className="space-y-4">
+                {/* Graduation */}
+                <div className="bg-surface-container-low/20 border border-outline-variant/30 rounded-xl p-4">
+                  <div className="flex justify-between items-start flex-wrap gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-primary">Graduation / Postgrad / Diploma</h4>
+                      <p className="text-xs text-on-surface font-semibold mt-1">{grad.degree || 'Degree not specified'} • {grad.school || 'College not specified'}</p>
+                      <p className="text-[10px] text-on-surface-variant mt-0.5">Completed: {grad.year || 'N/A'} | Grade: {grad.grade || 'N/A'}</p>
+                    </div>
+                    {grad.file && (
+                      <a href={grad.file} download={`graduation_certificate_${user.name}.png`} className="flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full text-[10px] font-black tracking-wider transition cursor-pointer">
+                        <span className="material-symbols-outlined text-[14px]">download</span> Certificate
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* 12th Standard */}
+                <div className="bg-surface-container-low/20 border border-outline-variant/30 rounded-xl p-4">
+                  <div className="flex justify-between items-start flex-wrap gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-primary">12th Standard / Intermediate</h4>
+                      <p className="text-xs text-on-surface font-semibold mt-1">{edu12.school || 'School not specified'}</p>
+                      <p className="text-[10px] text-on-surface-variant mt-0.5">Completed: {edu12.year || 'N/A'} | Grade: {edu12.grade || 'N/A'}</p>
+                    </div>
+                    {edu12.file && (
+                      <a href={edu12.file} download={`12th_marksheet_${user.name}.png`} className="flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full text-[10px] font-black tracking-wider transition cursor-pointer">
+                        <span className="material-symbols-outlined text-[14px]">download</span> Marksheet
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* 10th Standard */}
+                <div className="bg-surface-container-low/20 border border-outline-variant/30 rounded-xl p-4">
+                  <div className="flex justify-between items-start flex-wrap gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-primary">10th Standard / Matriculation</h4>
+                      <p className="text-xs text-on-surface font-semibold mt-1">{edu10.school || 'School not specified'}</p>
+                      <p className="text-[10px] text-on-surface-variant mt-0.5">Completed: {edu10.year || 'N/A'} | Grade: {edu10.grade || 'N/A'}</p>
+                    </div>
+                    {edu10.file && (
+                      <a href={edu10.file} download={`10th_marksheet_${user.name}.png`} className="flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full text-[10px] font-black tracking-wider transition cursor-pointer">
+                        <span className="material-symbols-outlined text-[14px]">download</span> Marksheet
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Work Experience */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+              <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-2 border-b border-outline-variant/30 pb-2">
+                <span className="material-symbols-outlined text-primary">work</span>
+                Employment History
+              </h3>
+              {user.isFirstJob ? (
+                <div className="p-4 bg-surface-container-low/30 border border-outline-variant/30 rounded-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">info</span>
+                  <span className="text-sm font-semibold text-on-surface">This is my first professional job. No prior experience letter is applicable.</span>
+                </div>
+              ) : (
+                <div className="bg-surface-container-low/20 border border-outline-variant/30 rounded-xl p-4">
+                  <div className="flex justify-between items-start flex-wrap gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-primary">Prior Experience</h4>
+                      <p className="text-xs text-on-surface font-semibold mt-1">{exp.company || 'Not specified'} • {exp.role || 'Not specified'}</p>
+                      <p className="text-[10px] text-on-surface-variant mt-0.5">Duration: {exp.duration || 'N/A'}</p>
+                    </div>
+                    {exp.file && (
+                      <a href={exp.file} download={`experience_letter_${user.name}.png`} className="flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-3 py-1 rounded-full text-[10px] font-black tracking-wider transition cursor-pointer">
+                        <span className="material-symbols-outlined text-[14px]">download</span> Relieving Letter
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        </div>
+        {savedAt && <p className="text-xs text-[#027A48] font-bold text-center mt-2 print-hide">Last saved at {savedAt}</p>}
+      </div>
+    );
+  }
+
   return (
-    <form onSubmit={onSave} className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm max-w-4xl space-y-6">
-      
-      {/* Profile Header / Photo */}
-      <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-outline-variant/30">
-        <div className="relative w-28 h-28 rounded-full border border-outline-variant overflow-hidden bg-surface-container-high/40 flex items-center justify-center">
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-7xl mx-auto w-full">
+      {/* Profile Header / Photo Uploader */}
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm flex flex-col sm:flex-row items-center gap-6">
+        <div className="relative w-28 h-28 rounded-full border border-outline-variant overflow-hidden bg-surface-container-high/40 flex items-center justify-center shrink-0">
           {form.profileImage ? (
             <img src={form.profileImage} alt="Profile" className="w-full h-full object-cover" />
           ) : (
             <span className="material-symbols-outlined text-[48px] text-on-surface-variant/40">person</span>
           )}
         </div>
-        <div className="space-y-2 text-center sm:text-left">
-          <h3 className="text-headline-sm font-bold text-on-surface">My Profile Picture</h3>
-          <p className="text-xs text-on-surface-variant max-w-md">Upload a professional headshot to display on the staff availability and bookings panel.</p>
+        <div className="space-y-2 text-center sm:text-left flex-1">
+          <h3 className="text-headline-sm font-bold text-on-surface">Upload Profile Photo</h3>
+          <p className="text-xs text-on-surface-variant max-w-md">Upload a professional headshot to display on the staff availability panel.</p>
           <div className="flex justify-center sm:justify-start">
             <FileUploader
               label="Profile Photo"
@@ -2577,210 +3300,253 @@ const EmployeeProfileTab: React.FC<{
             />
           </div>
         </div>
-      </div>
-
-      {/* General Personal Information */}
-      <div className="space-y-4">
-        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-primary">badge</span>
-          Personal Information
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Full name</span>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} required />
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Gender</span>
-            <input value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} placeholder="e.g. Female" className={inputCls} />
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Qualifications</span>
-            <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })} placeholder="e.g. MASLP" className={inputCls} />
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Email</span>
-            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} required />
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Phone</span>
-            <div className="relative flex items-center">
-              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
-            </div>
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Alternative Phone <span className="normal-case text-on-surface-variant/60 font-semibold">(Optional)</span></span>
-            <div className="relative flex items-center">
-              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
-              <input value={form.extraPhone} onChange={(e) => setForm({ ...form, extraPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} />
-            </div>
-          </label>
-          <label className="block sm:col-span-2">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Address</span>
-            <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Full residential address" className={inputCls} />
-          </label>
+        <div className="flex items-center gap-2 self-stretch sm:self-auto justify-center sm:justify-end">
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="px-5 py-2.5 border border-outline-variant rounded-full text-sm font-bold hover:bg-surface-container-high/20 transition cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-primary text-on-primary px-6 py-2.5 rounded-full font-bold text-sm hover:brightness-105 active:scale-95 transition shadow disabled:opacity-60 cursor-pointer"
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
         </div>
       </div>
 
-      {/* Parent Details */}
-      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
-        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-primary">family_restroom</span>
-          Parent / Guardian Information
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Parent / Guardian Name</span>
-            <input value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="Name" className={inputCls} required />
-          </label>
-          <label className="block">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Relation</span>
-            <input value={form.parentRelation} onChange={(e) => setForm({ ...form, parentRelation: e.target.value })} placeholder="e.g. Father, Mother" className={inputCls} required />
-          </label>
-          <label className="block sm:col-span-2">
-            <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1.5 text-xs">Contact Number</span>
-            <div className="relative flex items-center">
-              <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
-              <input value={form.parentPhone} onChange={(e) => setForm({ ...form, parentPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
-            </div>
-          </label>
-        </div>
-      </div>
-
-      {/* Education History */}
-      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
-        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-primary">school</span>
-          Education Information
-        </h3>
-
-        {/* 10th Standard */}
-        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
-          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">10th Standard / Matriculation</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
-              <input value={form.education10th.school} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, school: e.target.value } })} placeholder="e.g. CBSE / KV" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
-              <input value={form.education10th.year} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, year: e.target.value } })} placeholder="e.g. 2018" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
-              <input value={form.education10th.grade} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, grade: e.target.value } })} placeholder="e.g. 92%" className={inputCls} />
-            </label>
-          </div>
-          <FileUploader
-            label="10th Marksheet"
-            value={form.education10th.file}
-            onChange={(base64) => setForm({ ...form, education10th: { ...form.education10th, file: base64 } })}
-          />
-        </div>
-
-        {/* 12th Standard */}
-        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
-          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">12th Standard / Intermediate</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
-              <input value={form.education12th.school} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, school: e.target.value } })} placeholder="e.g. CBSE" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
-              <input value={form.education12th.year} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, year: e.target.value } })} placeholder="e.g. 2020" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
-              <input value={form.education12th.grade} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, grade: e.target.value } })} placeholder="e.g. 88%" className={inputCls} />
-            </label>
-          </div>
-          <FileUploader
-            label="12th Marksheet"
-            value={form.education12th.file}
-            onChange={(base64) => setForm({ ...form, education12th: { ...form.education12th, file: base64 } })}
-          />
-        </div>
-
-        {/* Graduation */}
-        <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3">
-          <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Graduation / Diploma / Postgrad</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Degree / Course</span>
-              <input value={form.educationGrad.degree} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, degree: e.target.value } })} placeholder="e.g. BASLP" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">College / University</span>
-              <input value={form.educationGrad.school} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, school: e.target.value } })} placeholder="e.g. AIISH" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
-              <input value={form.educationGrad.year} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, year: e.target.value } })} placeholder="e.g. 2024" className={inputCls} />
-            </label>
-            <label className="block">
-              <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / CGPA</span>
-              <input value={form.educationGrad.grade} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, grade: e.target.value } })} placeholder="e.g. 8.5 CGPA" className={inputCls} />
-            </label>
-          </div>
-          <FileUploader
-            label="Degree Certificate"
-            value={form.educationGrad.file}
-            onChange={(base64) => setForm({ ...form, educationGrad: { ...form.educationGrad, file: base64 } })}
-          />
-        </div>
-      </div>
-
-      {/* Work Experience */}
-      <div className="border-t border-outline-variant/30 pt-6 space-y-4">
-        <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-primary">work</span>
-          Work Experience
-        </h3>
-        
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={form.isFirstJob}
-            onChange={(e) => setForm({ ...form, isFirstJob: e.target.checked })}
-            className="w-4.5 h-4.5 border border-outline-variant rounded focus:ring-0 text-primary cursor-pointer"
-          />
-          <span className="text-body-sm font-bold text-on-surface-variant">This is my first job / I have no prior experience</span>
-        </label>
-
-        {!form.isFirstJob && (
-          <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-[1rem] p-4 space-y-3 animate-fade-in">
-            <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Previous Employment Details</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Structured Grid Layout for Inputs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Personal & Contact Card */}
+        <div className="space-y-6 md:col-span-1">
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+            <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5 border-b border-outline-variant/30 pb-2">
+              <span className="material-symbols-outlined text-primary">badge</span>
+              Personal Details
+            </h3>
+            <div className="space-y-4">
               <label className="block">
-                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Company / Organization</span>
-                <input value={form.pastExperience.company} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, company: e.target.value } })} placeholder="Company Name" className={inputCls} />
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Full name</span>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} required />
               </label>
               <label className="block">
-                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Role / Designation</span>
-                <input value={form.pastExperience.role} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, role: e.target.value } })} placeholder="e.g. Speech Therapist" className={inputCls} />
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Gender</span>
+                <input value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} placeholder="e.g. Female" className={inputCls} />
               </label>
               <label className="block">
-                <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Duration</span>
-                <input value={form.pastExperience.duration} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, duration: e.target.value } })} placeholder="e.g. 2 years" className={inputCls} />
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Qualifications</span>
+                <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })} placeholder="e.g. MASLP" className={inputCls} />
               </label>
             </div>
-            <FileUploader
-              label="Experience Letter / Relieving Letter"
-              value={form.pastExperience.file}
-              onChange={(base64) => setForm({ ...form, pastExperience: { ...form.pastExperience, file: base64 } })}
-            />
           </div>
-        )}
+
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+            <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5 border-b border-outline-variant/30 pb-2">
+              <span className="material-symbols-outlined text-primary">contacts</span>
+              Contact Information
+            </h3>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Email</span>
+                <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} required />
+              </label>
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Phone</span>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
+                </div>
+              </label>
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Alternative Phone <span className="normal-case text-on-surface-variant/60 font-semibold">(Optional)</span></span>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+                  <input value={form.extraPhone} onChange={(e) => setForm({ ...form, extraPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} />
+                </div>
+              </label>
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Address</span>
+                <textarea value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Full residential address" className="w-full bg-transparent border border-outline-variant rounded-xl p-3 text-sm text-on-surface focus:border-primary outline-none resize-none" rows={3} />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Family, Education, Experience columns */}
+        <div className="space-y-6 md:col-span-2">
+          {/* Family Card */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+            <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5 border-b border-outline-variant/30 pb-2">
+              <span className="material-symbols-outlined text-primary">family_restroom</span>
+              Parent / Guardian Details
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Parent / Guardian Name</span>
+                <input value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="Name" className={inputCls} required />
+              </label>
+              <label className="block">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Relation</span>
+                <input value={form.parentRelation} onChange={(e) => setForm({ ...form, parentRelation: e.target.value })} placeholder="e.g. Father, Mother" className={inputCls} required />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="block text-label-md uppercase tracking-wider text-primary font-extrabold mb-1 text-xs">Contact Number</span>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-on-surface-variant font-bold select-none text-xs">+91</span>
+                  <input value={form.parentPhone} onChange={(e) => setForm({ ...form, parentPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })} className={`${inputCls} pl-12`} required />
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Education Records */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+            <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5 border-b border-outline-variant/30 pb-2">
+              <span className="material-symbols-outlined text-primary">school</span>
+              Education Records
+            </h3>
+
+            {/* Graduation */}
+            <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-xl p-4 space-y-3">
+              <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Graduation / Diploma / Postgrad</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Degree / Course</span>
+                  <input value={form.educationGrad.degree} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, degree: e.target.value } })} placeholder="e.g. BASLP" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">College / University</span>
+                  <input value={form.educationGrad.school} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, school: e.target.value } })} placeholder="e.g. AIISH" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+                  <input value={form.educationGrad.year} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, year: e.target.value } })} placeholder="e.g. 2024" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / CGPA</span>
+                  <input value={form.educationGrad.grade} onChange={(e) => setForm({ ...form, educationGrad: { ...form.educationGrad, grade: e.target.value } })} placeholder="e.g. 8.5 CGPA" className={inputCls} />
+                </label>
+              </div>
+              <FileUploader
+                label="Degree Certificate"
+                value={form.educationGrad.file}
+                onChange={(base64) => setForm({ ...form, educationGrad: { ...form.educationGrad, file: base64 } })}
+              />
+            </div>
+
+            {/* 12th */}
+            <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-xl p-4 space-y-3">
+              <p className="font-extrabold text-xs text-primary uppercase tracking-wide">12th Standard / Intermediate</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
+                  <input value={form.education12th.school} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, school: e.target.value } })} placeholder="e.g. CBSE" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+                  <input value={form.education12th.year} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, year: e.target.value } })} placeholder="e.g. 2020" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
+                  <input value={form.education12th.grade} onChange={(e) => setForm({ ...form, education12th: { ...form.education12th, grade: e.target.value } })} placeholder="e.g. 88%" className={inputCls} />
+                </label>
+              </div>
+              <FileUploader
+                label="12th Marksheet"
+                value={form.education12th.file}
+                onChange={(base64) => setForm({ ...form, education12th: { ...form.education12th, file: base64 } })}
+              />
+            </div>
+
+            {/* 10th */}
+            <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-xl p-4 space-y-3">
+              <p className="font-extrabold text-xs text-primary uppercase tracking-wide">10th Standard / Matriculation</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Board / School</span>
+                  <input value={form.education10th.school} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, school: e.target.value } })} placeholder="e.g. CBSE / KV" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Year of Completion</span>
+                  <input value={form.education10th.year} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, year: e.target.value } })} placeholder="e.g. 2018" className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Grade / Percentage</span>
+                  <input value={form.education10th.grade} onChange={(e) => setForm({ ...form, education10th: { ...form.education10th, grade: e.target.value } })} placeholder="e.g. 92%" className={inputCls} />
+                </label>
+              </div>
+              <FileUploader
+                label="10th Marksheet"
+                value={form.education10th.file}
+                onChange={(base64) => setForm({ ...form, education10th: { ...form.education10th, file: base64 } })}
+              />
+            </div>
+          </div>
+
+          {/* Work Experience Card */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm space-y-4">
+            <h3 className="text-title-medium font-bold text-on-surface flex items-center gap-1.5 border-b border-outline-variant/30 pb-2">
+              <span className="material-symbols-outlined text-primary">work</span>
+              Work Experience
+            </h3>
+            
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={form.isFirstJob}
+                onChange={(e) => setForm({ ...form, isFirstJob: e.target.checked })}
+                className="w-4.5 h-4.5 border border-outline-variant rounded focus:ring-0 text-primary cursor-pointer"
+              />
+              <span className="text-body-sm font-bold text-on-surface-variant">This is my first job / I have no prior experience</span>
+            </label>
+
+            {!form.isFirstJob && (
+              <div className="bg-surface-container-low/30 border border-outline-variant/30 rounded-xl p-4 space-y-3 animate-fade-in">
+                <p className="font-extrabold text-xs text-primary uppercase tracking-wide">Previous Employment Details</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Company / Organization</span>
+                    <input value={form.pastExperience.company} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, company: e.target.value } })} placeholder="Company Name" className={inputCls} />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Role / Designation</span>
+                    <input value={form.pastExperience.role} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, role: e.target.value } })} placeholder="e.g. Speech Therapist" className={inputCls} />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[10px] uppercase tracking-wider text-on-surface-variant font-bold mb-1">Duration</span>
+                    <input value={form.pastExperience.duration} onChange={(e) => setForm({ ...form, pastExperience: { ...form.pastExperience, duration: e.target.value } })} placeholder="e.g. 2 years" className={inputCls} />
+                  </label>
+                </div>
+                <FileUploader
+                  label="Experience Letter / Relieving Letter"
+                  value={form.pastExperience.file}
+                  onChange={(base64) => setForm({ ...form, pastExperience: { ...form.pastExperience, file: base64 } })}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Save Button */}
-      <div className="flex items-center gap-3 pt-6 border-t border-outline-variant/30">
-        <button type="submit" disabled={saving} className="bg-primary text-on-primary px-6 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 cursor-pointer shadow-md">
-          {saving ? 'Saving…' : 'Save profile'}
+      {/* Sticky Bottom Actions */}
+      <div className="flex items-center justify-end gap-3 pt-6 border-t border-outline-variant/30 bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm">
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="px-6 py-2.5 border border-outline-variant rounded-full text-sm font-bold hover:bg-surface-container-high/20 transition cursor-pointer"
+        >
+          Cancel
         </button>
-        {savedAt && <span className="text-body-sm text-[#027A48]">Saved at {savedAt}</span>}
+        <button
+          type="submit"
+          disabled={saving}
+          className="bg-primary text-on-primary px-8 py-2.5 rounded-full font-bold text-sm hover:brightness-105 active:scale-95 transition shadow-md disabled:opacity-60 cursor-pointer"
+        >
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
       </div>
     </form>
   );
@@ -2794,145 +3560,165 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
 
   // Hardcode generated monthly slips based on current year
   const slips = [
-    { month: 'May', year: 2026 },
-    { month: 'April', year: 2026 },
-    { month: 'March', year: 2026 },
+    { month: 'May', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
+    { month: 'April', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
+    { month: 'March', year: 2026, basic: '₹35,000.00', gross: '₹55,000.00', net: '₹53,000.00' },
   ];
 
-  const printSlip = () => {
-    window.print();
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm max-w-xl">
-        <h2 className="text-headline-sm font-bold text-on-surface mb-2 flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">receipt_long</span>
-          My Salary Slips
-        </h2>
-        <p className="text-body-sm text-on-surface-variant mb-4">View and print your monthly pay slips.</p>
-        
-        <div className="space-y-2">
-          {slips.map((s) => (
-            <div
-              key={`${s.month}-${s.year}`}
-              className="flex items-center justify-between gap-3 bg-surface-container-high/20 border border-outline-variant/50 hover:border-primary/50 rounded-xl px-4 py-3 cursor-pointer transition-colors"
-              onClick={() => setSelectedSlip(s)}
-            >
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-primary text-[24px]">payments</span>
-                <div>
-                  <p className="font-bold text-on-surface text-sm">{s.month} {s.year}</p>
-                  <p className="text-[10px] text-on-surface-variant">Recharge Rehabilitation Pvt Ltd</p>
-                </div>
-              </div>
-              <button className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition">
-                View Payslip
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {selectedSlip && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={() => setSelectedSlip(null)}>
-          <div className="w-full max-w-2xl bg-white text-black p-8 rounded-[1.5rem] shadow-2xl relative border border-slate-300" onClick={(e) => e.stopPropagation()}>
+  if (selectedSlip) {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto w-full">
+        {/* Back header */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <button
+            onClick={() => setSelectedSlip(null)}
+            className="flex items-center gap-1.5 px-4 py-2 border border-outline-variant hover:bg-surface-container-high/30 rounded-full font-bold text-xs transition cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            Back to Salary Slips
+          </button>
+          
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setSelectedSlip(null)}
-              className="absolute top-5 right-5 text-slate-500 hover:text-black border border-slate-300 p-1.5 rounded-full print:hidden hover:bg-slate-100 transition"
+              onClick={() => downloadDocument('salary-slip-print', `Payslip_${selectedSlip.month}_${selectedSlip.year}.html`)}
+              className="bg-secondary text-on-secondary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">close</span>
+              <span className="material-symbols-outlined text-[16px]">download</span>
+              Download Document
             </button>
-            
-            <div id="salary-slip-print" className="font-sans text-slate-800 text-xs leading-relaxed space-y-6">
-              {/* Slip Header */}
-              <div className="text-center pb-4 border-b-2 border-slate-300 space-y-1">
-                <h2 className="text-lg font-black tracking-tight text-slate-900">RECHARGE REHABILITATION PRIVATE LIMITED</h2>
-                <p className="text-[10px] text-slate-500">Regd Office: Sector 5, Dwarka, New Delhi - 110075</p>
-                <h3 className="font-bold text-xs bg-slate-100 py-1 max-w-[200px] mx-auto rounded">PAYSLIP FOR {selectedSlip.month.toUpperCase()} {selectedSlip.year}</h3>
-              </div>
+            <button
+              onClick={() => printDocument('salary-slip-print')}
+              className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">print</span>
+              Print Document
+            </button>
+          </div>
+        </div>
 
-              {/* Employee Details Grid */}
-              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-200">
-                <div className="space-y-1">
-                  <p><strong>Employee ID:</strong> {user.id.toUpperCase()}</p>
-                  <p><strong>Employee Name:</strong> {user.name || 'Staff'}</p>
-                  <p><strong>Designation:</strong> {user.specialty || 'Therapist'}</p>
-                  <p><strong>Department:</strong> Rehabilitation Services</p>
-                </div>
-                <div className="space-y-1 text-right sm:text-left">
-                  <p><strong>Days Paid:</strong> 30</p>
-                  <p><strong>Bank A/C No:</strong> ************5643</p>
-                  <p><strong>PF Account No:</strong> DL/DWA/0098765/000/0034</p>
-                  <p><strong>PAN:</strong> APM*****5D</p>
-                </div>
-              </div>
+        {/* Payslip Content Area */}
+        <div id="salary-slip-print" className="bg-white text-black p-8 sm:p-12 border border-slate-300 rounded-[1.5rem] shadow-md font-sans text-slate-800 text-xs leading-relaxed space-y-6">
+          {/* Slip Header */}
+          <div className="text-center pb-4 border-b-2 border-slate-300 space-y-1">
+            <h2 className="text-lg font-black tracking-tight text-slate-950">RECHARGE REHABILITATION PRIVATE LIMITED</h2>
+            <p className="text-[10px] text-slate-500">Regd Office: Sector 5, Dwarka, New Delhi - 110075</p>
+            <h3 className="font-bold text-xs bg-slate-100 py-1 max-w-[200px] mx-auto rounded">PAYSLIP FOR {selectedSlip.month.toUpperCase()} {selectedSlip.year}</h3>
+          </div>
 
-              {/* Earnings & Deductions Tables */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 border-b border-slate-300 pb-4">
-                {/* Earnings */}
-                <div>
-                  <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Earnings</h4>
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between"><span>Basic Pay</span><span className="font-semibold">₹35,000.00</span></div>
-                    <div className="flex justify-between"><span>House Rent Allowance (HRA)</span><span className="font-semibold">₹12,000.00</span></div>
-                    <div className="flex justify-between"><span>Conveyance Allowance</span><span className="font-semibold">₹3,000.00</span></div>
-                    <div className="flex justify-between"><span>Special Allowance</span><span className="font-semibold">₹5,000.00</span></div>
-                    <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Gross Earnings</span><span>₹55,000.00</span></div>
-                  </div>
-                </div>
-                {/* Deductions */}
-                <div className="mt-4 sm:mt-0">
-                  <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Deductions</h4>
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between"><span>Provident Fund (PF)</span><span className="font-semibold">₹1,800.00</span></div>
-                    <div className="flex justify-between"><span>Professional Tax</span><span className="font-semibold">₹200.00</span></div>
-                    <div className="flex justify-between"><span>TDS / Income Tax</span><span className="font-semibold">₹0.00</span></div>
-                    <div className="flex justify-between opacity-0 sm:block"><span>&nbsp;</span></div>
-                    <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Total Deductions</span><span>₹2,000.00</span></div>
-                  </div>
-                </div>
-              </div>
+          {/* Employee Details Grid */}
+          <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-200">
+            <div className="space-y-1">
+              <p><strong>Employee ID:</strong> {user.id.toUpperCase()}</p>
+              <p><strong>Employee Name:</strong> {user.name || 'Staff'}</p>
+              <p><strong>Designation:</strong> {user.specialty || 'Therapist'}</p>
+              <p><strong>Department:</strong> Rehabilitation Services</p>
+            </div>
+            <div className="space-y-1 text-right sm:text-left">
+              <p><strong>Days Paid:</strong> 30</p>
+              <p><strong>Bank A/C No:</strong> ************5643</p>
+              <p><strong>PF Account No:</strong> DL/DWA/0098765/000/0034</p>
+              <p><strong>PAN:</strong> APM*****5D</p>
+            </div>
+          </div>
 
-              {/* Net Pay */}
-              <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div className="text-center sm:text-left mb-2 sm:mb-0">
-                  <span className="block text-[10px] text-slate-500 uppercase font-black">Net Salary Payable</span>
-                  <span className="text-lg font-black text-slate-900">₹53,000.00</span>
-                </div>
-                <p className="text-slate-600 font-bold text-[10px] text-center sm:text-right">Rupees Fifty-Three Thousand Only</p>
-              </div>
-
-              {/* Signatures */}
-              <div className="flex justify-between pt-8 text-[10px]">
-                <div className="text-center border-t border-slate-200 pt-1.5 w-36">
-                  <p>Employee Signature</p>
-                </div>
-                <div className="text-center border-t border-slate-200 pt-1.5 w-36">
-                  <p>Authorised Signatory</p>
-                </div>
+          {/* Earnings & Deductions Tables */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 border-b border-slate-300 pb-4">
+            {/* Earnings */}
+            <div>
+              <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Earnings</h4>
+              <div className="space-y-1.5">
+                <div className="flex justify-between"><span>Basic Pay</span><span className="font-semibold">₹35,000.00</span></div>
+                <div className="flex justify-between"><span>House Rent Allowance (HRA)</span><span className="font-semibold">₹12,000.00</span></div>
+                <div className="flex justify-between"><span>Conveyance Allowance</span><span className="font-semibold">₹3,000.00</span></div>
+                <div className="flex justify-between"><span>Special Allowance</span><span className="font-semibold">₹5,000.00</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Gross Earnings</span><span>₹55,000.00</span></div>
               </div>
             </div>
+            {/* Deductions */}
+            <div className="mt-4 sm:mt-0">
+              <h4 className="font-bold border-b border-slate-200 pb-1 mb-2 text-slate-900">Deductions</h4>
+              <div className="space-y-1.5">
+                <div className="flex justify-between"><span>Provident Fund (PF)</span><span className="font-semibold">₹1,800.00</span></div>
+                <div className="flex justify-between"><span>Professional Tax</span><span className="font-semibold">₹200.00</span></div>
+                <div className="flex justify-between"><span>TDS / Income Tax</span><span className="font-semibold">₹0.00</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900"><span>Total Deductions</span><span>₹2,000.00</span></div>
+              </div>
+            </div>
+          </div>
 
-            {/* Print Button */}
-            <div className="mt-6 flex justify-end gap-2 print:hidden border-t border-slate-200 pt-4">
-              <button
-                onClick={() => setSelectedSlip(null)}
-                className="px-4 py-2 border border-slate-300 rounded-full font-bold text-xs hover:bg-slate-50 transition cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                onClick={printSlip}
-                className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">print</span>
-                Print Payslip
-              </button>
+          {/* Net Pay */}
+          <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div className="text-center sm:text-left mb-2 sm:mb-0">
+              <span className="block text-[10px] text-slate-500 uppercase font-black">Net Salary Payable</span>
+              <span className="text-lg font-black text-slate-950">₹53,000.00</span>
+            </div>
+            <p className="text-slate-600 font-bold text-[10px] text-center sm:text-right">Rupees Fifty-Three Thousand Only</p>
+          </div>
+
+          {/* Signatures */}
+          <div className="flex justify-between pt-8 text-[10px]">
+            <div className="text-center border-t border-slate-200 pt-1.5 w-36">
+              <p>Employee Signature</p>
+            </div>
+            <div className="text-center border-t border-slate-200 pt-1.5 w-36">
+              <p>Authorised Signatory</p>
             </div>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 w-full max-w-7xl mx-auto">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm">
+        <div className="mb-4">
+          <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">receipt_long</span>
+            My Salary Slips
+          </h2>
+          <p className="text-body-sm text-on-surface-variant">View and download your monthly payroll records.</p>
+        </div>
+
+        {/* Professional Table List View */}
+        <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
+          <table className="w-full text-left border-collapse text-sm text-on-surface">
+            <thead className="bg-surface-container-high border-b border-outline-variant/40">
+              <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
+                <th className="p-4">Period</th>
+                <th className="p-4">Company</th>
+                <th className="p-4">Basic Pay</th>
+                <th className="p-4">Gross Earnings</th>
+                <th className="p-4">Net Salary</th>
+                <th className="p-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
+              {slips.map((s) => (
+                <tr key={`${s.month}-${s.year}`} className="hover:bg-surface-container-low/20 transition-colors">
+                  <td className="p-4 font-bold text-primary">
+                    {s.month} {s.year}
+                  </td>
+                  <td className="p-4 text-on-surface-variant text-xs font-semibold">
+                    Recharge Rehabilitation Pvt Ltd
+                  </td>
+                  <td className="p-4 font-semibold">{s.basic}</td>
+                  <td className="p-4 font-semibold">{s.gross}</td>
+                  <td className="p-4 font-bold text-[#027A48]">{s.net}</td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => setSelectedSlip(s)}
+                      className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer"
+                    >
+                      View Payslip
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
@@ -2941,97 +3727,176 @@ const EmployeeSalarySlipTab: React.FC<{ user: User }> = ({ user }) => {
 // Employee — Offer Letter view
 // ---------------------------------------------------------------------------
 const EmployeeOfferLetterTab: React.FC<{ user: User }> = ({ user }) => {
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">description</span>
-          My Offer Letter
-        </h2>
-        <button
-          onClick={() => window.print()}
-          className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow"
-        >
-          <span className="material-symbols-outlined text-[16px]">print</span>
-          Print/Save Document
-        </button>
-      </div>
+  const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
 
-      <div id="offer-letter-print" className="bg-white text-black p-8 sm:p-12 border border-slate-200 rounded-[1.5rem] max-w-3xl shadow-md font-serif text-slate-800 leading-relaxed text-sm space-y-6">
-        {/* Company Letterhead */}
-        <div className="text-center border-b-2 border-slate-800 pb-4 space-y-1">
-          <h1 className="text-xl font-black tracking-tight text-slate-950">RECHARGE REHABILITATION PRIVATE LIMITED</h1>
-          <p className="text-[10px] text-slate-500 font-sans uppercase tracking-widest">Pediatric Therapy & Speech Rehabilitation Services</p>
-          <p className="text-[10px] text-slate-500 font-sans">Contact: contact@rechargerehab.in | Web: www.rechargerehab.in</p>
-        </div>
+  const docs = [
+    { id: 'offer_letter', name: 'Official Appointment & Offer Letter', date: 'June 1, 2026', type: 'Employment Agreement', status: 'Accepted' }
+  ];
 
-        {/* Date / Address */}
-        <div className="space-y-1 font-sans text-xs">
-          <p className="font-bold">Date: June 1, 2026</p>
-          <p className="font-bold">To,</p>
-          <p className="font-bold text-slate-950">{user.name || 'Staff'}</p>
-          <p>{user.address || 'New Delhi, India'}</p>
-        </div>
-
-        {/* Subject */}
-        <div className="text-center font-bold underline text-slate-950 text-xs font-sans uppercase">
-          Subject: Offer of Appointment for the position of {user.specialty || 'Therapist'}
-        </div>
-
-        {/* Greeting / Body */}
-        <div className="space-y-4">
-          <p>Dear {user.name || 'Staff'},</p>
+  if (selectedDoc === 'offer_letter') {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto w-full">
+        {/* Back header */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <button
+            onClick={() => setSelectedDoc(null)}
+            className="flex items-center gap-1.5 px-4 py-2 border border-outline-variant hover:bg-surface-container-high/30 rounded-full font-bold text-xs transition cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            Back to Documents
+          </button>
           
-          <p>
-            With reference to your application and subsequent interview you had with us, we are pleased to offer you the appointment as **{user.specialty || 'Therapist'}** at Recharge Rehabilitation.
-          </p>
-
-          <p>
-            Your Date of Joining will be **June 15, 2026**. Your gross salary package (CTC) will be **₹6,60,000.00 per annum** (Rupees Six Lakhs Sixty Thousand Only) as agreed. Detailed annexure of compensation breakdown is attached herewith.
-          </p>
-
-          <h4 className="font-bold text-slate-950 font-sans text-xs uppercase pt-2">Terms & Conditions of Employment:</h4>
-          
-          <ul className="list-decimal pl-6 space-y-2 text-xs font-sans">
-            <li>
-              <strong>Probation Period:</strong> You will be on probation for a period of six (6) months from your date of joining. Upon successful evaluation, your employment will be confirmed in writing.
-            </li>
-            <li>
-              <strong>Working Hours:</strong> The clinic operates from 09:30 AM to 06:30 PM, Monday through Saturday.
-            </li>
-            <li>
-              <strong>Notice Period:</strong> During probation, either party can terminate the agreement with 15 days' notice. Post confirmation, the notice period will be one (1) month.
-            </li>
-            <li>
-              <strong>Confidentiality:</strong> You will maintain strict confidentiality regarding all clinical data, patient profiles, treatment records, and company operations.
-            </li>
-          </ul>
-
-          <p>
-            Please sign and return the duplicate copy of this letter as a token of your formal acceptance. We look forward to a rewarding professional relationship with you.
-          </p>
-        </div>
-
-        {/* Signatures */}
-        <div className="flex justify-between pt-12 text-xs font-sans">
-          <div className="space-y-4">
-            <p>Sincerely,</p>
-            <div className="h-8" /> {/* Placeholder for signature */}
-            <p className="font-bold text-slate-900">Dr. Ankush Jha</p>
-            <p className="text-slate-500">Founder & Director</p>
-            <p className="text-[10px] text-slate-400">Recharge Rehabilitation Pvt Ltd</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => downloadDocument('offer-letter-print', `Offer_Letter_${user.name || 'Staff'}.html`)}
+              className="bg-secondary text-on-secondary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">download</span>
+              Download Document
+            </button>
+            <button
+              onClick={() => printDocument('offer-letter-print')}
+              className="bg-primary text-on-primary hover:brightness-105 active:scale-95 px-5 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">print</span>
+              Print Document
+            </button>
           </div>
-          <div className="space-y-4 text-right self-end">
-            <div className="border-t border-slate-300 pt-2 w-48 text-center">
-              <p>Accepted By</p>
-              <p className="font-semibold text-slate-900 mt-1">{user.name || 'Staff'}</p>
+        </div>
+
+        {/* Offer Letter Frame */}
+        <div id="offer-letter-print" className="bg-white text-black p-8 sm:p-12 border border-slate-300 rounded-[1.5rem] shadow-md font-serif text-slate-800 leading-relaxed text-sm space-y-6">
+          {/* Company Letterhead */}
+          <div className="text-center border-b-2 border-slate-800 pb-4 space-y-1">
+            <h1 className="text-xl font-black tracking-tight text-slate-950">RECHARGE REHABILITATION PRIVATE LIMITED</h1>
+            <p className="text-[10px] text-slate-500 font-sans uppercase tracking-widest">Pediatric Therapy & Speech Rehabilitation Services</p>
+            <p className="text-[10px] text-slate-500 font-sans">Contact: contact@rechargerehab.in | Web: www.rechargerehab.in</p>
+          </div>
+
+          {/* Date / Address */}
+          <div className="space-y-1 font-sans text-xs">
+            <p className="font-bold">Date: June 1, 2026</p>
+            <p className="font-bold">To,</p>
+            <p className="font-bold text-slate-950">{user.name || 'Staff'}</p>
+            <p>{user.address || 'New Delhi, India'}</p>
+          </div>
+
+          {/* Subject */}
+          <div className="text-center font-bold underline text-slate-950 text-xs font-sans uppercase">
+            Subject: Offer of Appointment for the position of {user.specialty || 'Therapist'}
+          </div>
+
+          {/* Greeting / Body */}
+          <div className="space-y-4">
+            <p>Dear {user.name || 'Staff'},</p>
+            
+            <p>
+              With reference to your application and subsequent interview you had with us, we are pleased to offer you the appointment as **{user.specialty || 'Therapist'}** at Recharge Rehabilitation.
+            </p>
+
+            <p>
+              Your Date of Joining will be **June 15, 2026**. Your gross salary package (CTC) will be **₹6,60,000.00 per annum** (Rupees Six Lakhs Sixty Thousand Only) as agreed. Detailed annexure of compensation breakdown is attached herewith.
+            </p>
+
+            <h4 className="font-bold text-slate-950 font-sans text-xs uppercase pt-2">Terms & Conditions of Employment:</h4>
+            
+            <ul className="list-decimal pl-6 space-y-2 text-xs font-sans">
+              <li>
+                <strong>Probation Period:</strong> You will be on probation for a period of six (6) months from your date of joining. Upon successful evaluation, your employment will be confirmed in writing.
+              </li>
+              <li>
+                <strong>Working Hours:</strong> The clinic operates from 09:30 AM to 06:30 PM, Monday through Saturday.
+              </li>
+              <li>
+                <strong>Notice Period:</strong> During probation, either party can terminate the agreement with 15 days' notice. Post confirmation, the notice period will be one (1) month.
+              </li>
+              <li>
+                <strong>Confidentiality:</strong> You will maintain strict confidentiality regarding all clinical data, patient profiles, treatment records, and company operations.
+              </li>
+            </ul>
+
+            <p>
+              Please sign and return the duplicate copy of this letter as a token of your formal acceptance. We look forward to a rewarding professional relationship with you.
+            </p>
+          </div>
+
+          {/* Signatures */}
+          <div className="flex justify-between pt-12 text-xs font-sans">
+            <div className="space-y-4">
+              <p>Sincerely,</p>
+              <div className="h-8" />
+              <p className="font-bold text-slate-900">Dr. Ankush Jha</p>
+              <p className="text-slate-500">Founder & Director</p>
+              <p className="text-[10px] text-slate-400">Recharge Rehabilitation Pvt Ltd</p>
+            </div>
+            <div className="space-y-4 text-right self-end">
+              <div className="border-t border-slate-300 pt-2 w-48 text-center">
+                <p>Accepted By</p>
+                <p className="font-semibold text-slate-950 mt-1">{user.name || 'Staff'}</p>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 w-full max-w-7xl mx-auto">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 shadow-sm">
+        <div className="mb-4">
+          <h2 className="text-headline-sm font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">description</span>
+            Official Documents & Letters
+          </h2>
+          <p className="text-body-sm text-on-surface-variant">Access your job offers, agreements, and official document copies.</p>
+        </div>
+
+        {/* Professional Documents Table */}
+        <div className="overflow-x-auto border border-outline-variant/40 rounded-xl">
+          <table className="w-full text-left border-collapse text-sm text-on-surface">
+            <thead className="bg-surface-container-high border-b border-outline-variant/40">
+              <tr className="text-on-surface-variant uppercase tracking-wider font-extrabold text-[10px]">
+                <th className="p-4">Document Name</th>
+                <th className="p-4">Date Issued</th>
+                <th className="p-4">Document Type</th>
+                <th className="p-4">Status</th>
+                <th className="p-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/20 text-on-surface font-medium">
+              {docs.map((doc) => (
+                <tr key={doc.id} className="hover:bg-surface-container-low/20 transition-colors">
+                  <td className="p-4 font-bold text-primary">
+                    {doc.name}
+                  </td>
+                  <td className="p-4 text-on-surface-variant text-xs font-semibold">
+                    {doc.date}
+                  </td>
+                  <td className="p-4 text-on-surface-variant text-xs font-semibold">{doc.type}</td>
+                  <td className="p-4">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-[#D1FADF] text-[#027A48]">
+                      {doc.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => setSelectedDoc(doc.id)}
+                      className="bg-primary/10 text-primary hover:bg-primary hover:text-on-primary px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer"
+                    >
+                      View Document
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
 };
+
 
 // ---------------------------------------------------------------------------
 // Employee — Leave Requests view

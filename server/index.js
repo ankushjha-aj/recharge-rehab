@@ -280,7 +280,7 @@ async function applyCsvAvailability(date, entries) {
 
   const matched = [];
   const unmatched = [];
-  const rows = []; // { staffId, time }
+  const rows = []; // { staffId, time, reason }
   for (const entry of list) {
     const idRaw = String(entry.identifier ?? '').trim();
     if (!idRaw) continue;
@@ -290,7 +290,14 @@ async function applyCsvAvailability(date, entries) {
       continue;
     }
     const times = Array.from(new Set((entry.times || []).filter(Boolean)));
-    for (const t of times) rows.push({ staffId: emp.id, time: t });
+    const reasons = entry.reasons || {};
+    for (const t of times) {
+      rows.push({
+        staffId: emp.id,
+        time: t,
+        reason: String(reasons[t] || 'Booked (daily upload)').trim()
+      });
+    }
     matched.push({ identifier: idRaw, staffId: emp.id, name: emp.name, count: times.length });
   }
 
@@ -301,9 +308,9 @@ async function applyCsvAvailability(date, entries) {
     for (const r of rows) {
       await client.query(
         `INSERT INTO blocked_slots (id, date, time, staff_id, reason, source)
-         VALUES ($1,$2,$3,$4,'Booked (daily upload)','csv')
+         VALUES ($1,$2,$3,$4,$5,'csv')
          ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, source = 'csv'`,
-        [`csv|${date}|${r.time}|${r.staffId}`, date, r.time, r.staffId],
+        [`csv|${date}|${r.time}|${r.staffId}`, date, r.time, r.staffId, r.reason],
       );
     }
     await client.query('COMMIT');
@@ -404,10 +411,40 @@ async function updateMyProfile(user, patch = {}) {
 }
 
 async function listMySessions(user) {
-  const { rows } = await pool.query(
-    `SELECT * FROM bookings WHERE specialist_id = $1 ORDER BY date, slot`, [user.id],
+  const bookingsRes = await pool.query(
+    `SELECT * FROM bookings WHERE specialist_id = $1`, [user.id],
   );
-  return rows.map(toBooking);
+  const blocksRes = await pool.query(
+    `SELECT * FROM blocked_slots WHERE staff_id = $1`, [user.id],
+  );
+
+  const bookings = bookingsRes.rows.map(toBooking);
+  const blocks = blocksRes.rows.map((r) => ({
+    id: r.id,
+    source: 'blocked',
+    mode: 'clinic',
+    sessionType: r.source === 'csv' ? 'CSV Schedule Block' : 'Manual Block',
+    specialistId: r.staff_id,
+    date: r.date,
+    slot: r.time,
+    parentName: r.reason || 'Blocked Slot',
+    status: 'Blocked',
+    notes: r.reason || '',
+    childAge: '',
+    phone: '',
+    concern: '',
+    payment: 'pending',
+    seen: true,
+    requestedAt: isoOrNull(new Date()),
+    updatedAt: isoOrNull(new Date()),
+  }));
+
+  const combined = [...bookings, ...blocks];
+  combined.sort((a, b) => {
+    if (a.date !== b.date) return (a.date || '').localeCompare(b.date || '');
+    return (a.slot || '').localeCompare(b.slot || '');
+  });
+  return combined;
 }
 
 async function resetMyPassword(user, { newPassword }) {
@@ -566,7 +603,7 @@ async function route(action, payload, token) {
 // ---- HTTP ------------------------------------------------------------------
 const app = express();
 app.use(cors({ origin: true }));
-const textBody = express.text({ type: () => true, limit: '256kb' });
+const textBody = express.text({ type: () => true, limit: '50mb' });
 
 app.get('/api/health', async (_req, res) => {
   try {
