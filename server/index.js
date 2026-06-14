@@ -427,13 +427,26 @@ async function createUser(actor, p) {
   if (!p.id || !p.password) throw httpErr(400, 'A login ID and password are required.');
   const exists = await pool.query('SELECT 1 FROM users WHERE id = $1', [p.id]);
   if (exists.rowCount) throw httpErr(409, 'That login ID is already taken.');
+  const baseSalary = parseInt(p.baseSalary, 10) || 35000;
   const { rows } = await pool.query(
-    `INSERT INTO users (id, name, password_hash, role, specialty, gender, qualifications, experience, email, phone)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    `INSERT INTO users (id, name, password_hash, role, specialty, gender, qualifications, experience, email, phone, base_salary)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
     [p.id, p.name || '', bcrypt.hashSync(p.password, 10), role, p.specialty || '',
-     p.gender || '', p.qualifications || '', p.experience || '', p.email || '', p.phone || ''],
+     p.gender || '', p.qualifications || '', p.experience || '', p.email || '', p.phone || '', baseSalary],
   );
-  return toUser(rows[0]);
+  const u = toUser(rows[0]);
+  if (u.role === 'employee') {
+    await pool.query(
+      `INSERT INTO staff (id, name, role, active, base_salary)
+       VALUES ($1, $2, $3, TRUE, $4)
+       ON CONFLICT (id) DO UPDATE SET 
+         name = EXCLUDED.name, 
+         role = EXCLUDED.role, 
+         base_salary = EXCLUDED.base_salary`,
+      [u.id, u.name, u.specialty, u.baseSalary]
+    );
+  }
+  return u;
 }
 
 async function updateUser(actor, { id, patch = {} }) {
@@ -455,7 +468,20 @@ async function updateUser(actor, { id, patch = {} }) {
   if (!sets.length) return toUser(target);
   vals.push(id);
   const { rows } = await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
-  return toUser(rows[0]);
+  const u = toUser(rows[0]);
+  if (u.role === 'employee') {
+    await pool.query(
+      `INSERT INTO staff (id, name, role, active, base_salary)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET 
+         name = EXCLUDED.name, 
+         role = EXCLUDED.role, 
+         active = EXCLUDED.active,
+         base_salary = EXCLUDED.base_salary`,
+      [u.id, u.name, u.specialty, u.active, u.baseSalary]
+    );
+  }
+  return u;
 }
 
 async function resetPassword(actor, { id, password }) {
@@ -490,7 +516,19 @@ async function updateMyProfile(user, patch = {}) {
   sets.push(`profile_complete = TRUE`);
   vals.push(user.id);
   const { rows } = await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
-  return toUser(rows[0]);
+  const u = toUser(rows[0]);
+  if (u.role === 'employee') {
+    await pool.query(
+      `INSERT INTO staff (id, name, role, active, base_salary)
+       VALUES ($1, $2, $3, TRUE, $4)
+       ON CONFLICT (id) DO UPDATE SET 
+         name = EXCLUDED.name, 
+         role = EXCLUDED.role, 
+         base_salary = EXCLUDED.base_salary`,
+      [u.id, u.name, u.specialty, u.baseSalary]
+    );
+  }
+  return u;
 }
 
 async function listMySessions(user) {

@@ -22,6 +22,8 @@ import {
   clearCsvAvailability,
   parseAvailabilityCsv,
   todayISO,
+  dayAvailability,
+  isStaffBusyAt,
   SLOT_TIMES,
   formatSlot,
   type BookingRequest,
@@ -1134,10 +1136,41 @@ const RequestsTab: React.FC<{
 
   const employees = useMemo(() => users.filter((u) => u.role === 'employee'), [users]);
 
+  const [avail, setAvail] = useState<any>(null);
+  const [loadingAvail, setLoadingAvail] = useState(false);
+
+  useEffect(() => {
+    if (form.date && showCreateModal) {
+      setLoadingAvail(true);
+      dayAvailability(form.date)
+        .then(setAvail)
+        .catch(() => setAvail(null))
+        .finally(() => setLoadingAvail(false));
+    }
+  }, [form.date, showCreateModal]);
+
+  const isSlotDisabled = (slotTime: string) => {
+    if (!avail) return false;
+    if (form.specialistId !== 'any') {
+      return isStaffBusyAt(avail, form.specialistId, slotTime);
+    }
+    const activeEmps = employees.filter(e => e.active);
+    const clinicWide = avail.blocked.some((b: any) => b.time === slotTime && b.staffId === 'any');
+    if (clinicWide) return true;
+    if (activeEmps.length > 0 && activeEmps.every(e => isStaffBusyAt(avail, e.id, slotTime))) {
+      return true;
+    }
+    return false;
+  };
+
   const handleCreateBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.parentName) {
       alert('Client/Parent Name is required.');
+      return;
+    }
+    if (isSlotDisabled(form.slot)) {
+      alert(`The slot ${formatSlot(form.slot)} is already booked or busy for this specialist on ${form.date}. Please choose a different slot, date, or specialist.`);
       return;
     }
     setIsCreating(true);
@@ -1286,15 +1319,23 @@ const RequestsTab: React.FC<{
               </label>
 
               <label className="block">
-                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">Time Slot</span>
+                <span className="block font-bold text-on-surface-variant mb-1 uppercase tracking-wide">
+                  Time Slot {loadingAvail && <span className="text-[10px] text-primary animate-pulse">(checking...)</span>}
+                </span>
                 <select
                   value={form.slot}
                   onChange={(e) => setForm({ ...form, slot: e.target.value })}
                   className="w-full bg-transparent border border-outline-variant rounded-xl py-2 px-3 text-sm text-on-surface focus:border-primary outline-none"
+                  disabled={loadingAvail}
                 >
-                  {SLOT_TIMES.map(t => (
-                    <option key={t} value={t}>{formatSlot(t)}</option>
-                  ))}
+                  {SLOT_TIMES.map(t => {
+                    const disabled = isSlotDisabled(t);
+                    return (
+                      <option key={t} value={t} disabled={disabled}>
+                        {formatSlot(t)}{disabled ? ' - (Booked/Busy)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
 
@@ -2656,7 +2697,7 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
       .finally(() => setLoadingSalary(false));
   }, [user.id, currentMonth]);
 
-  const todays = useMemo(() => sessions.filter((s) => s.date === today), [sessions, today]);
+  const todays = useMemo(() => sessions.filter((s) => s.date === today && s.status !== 'cancelled'), [sessions, today]);
   const clientSessions = useMemo(() => todays.filter((s) => s.source !== 'blocked'), [todays]);
   const blockedSessions = useMemo(() => todays.filter((s) => s.source === 'blocked'), [todays]);
 
@@ -2839,18 +2880,7 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
 // ---------------------------------------------------------------------------
 const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ sessions }) => {
   const today = todayISO();
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>('');
-
-  const months = useMemo(() => {
-    const set = new Set<string>();
-    sessions.forEach((s) => {
-      if (s.date) {
-        set.add(s.date.substring(0, 7));
-      }
-    });
-    return Array.from(set).sort().reverse();
-  }, [sessions]);
 
   const formatYearMonth = (ym: string) => {
     if (ym === 'TBD') return 'Date TBD';
@@ -2861,13 +2891,10 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
 
   const groupedSessions = useMemo(() => {
     const filtered = sessions.filter((s) => {
-      if (selectedPeriod === 'date') {
+      if (selectedDate) {
         return s.date === selectedDate;
       }
-      if (selectedPeriod === 'all') return true;
-      if (selectedPeriod === 'today_upcoming') return s.date >= today;
-      if (selectedPeriod === 'past') return s.date < today;
-      return s.date && s.date.startsWith(selectedPeriod);
+      return true;
     });
 
     const groups: Record<string, BookingRequest[]> = {};
@@ -2884,7 +2911,7 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
         obj[key] = groups[key];
         return obj;
       }, {} as Record<string, BookingRequest[]>);
-  }, [sessions, selectedPeriod, selectedDate, today]);
+  }, [sessions, selectedDate]);
 
   const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => {
     const isBlocked = s.source === 'blocked';
@@ -2949,7 +2976,6 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
               value={selectedDate}
               onChange={(e) => {
                 setSelectedDate(e.target.value);
-                setSelectedPeriod(e.target.value ? 'date' : 'all');
               }}
               className="bg-transparent text-xs text-on-surface outline-none cursor-pointer border-none p-0 focus:ring-0 w-28 font-bold"
             />
@@ -2957,7 +2983,6 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
               <button
                 onClick={() => {
                   setSelectedDate('');
-                  setSelectedPeriod('all');
                 }}
                 className="text-on-surface-variant hover:text-primary transition p-0.5"
                 title="Clear date filter"
@@ -2965,37 +2990,6 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
                 <span className="material-symbols-outlined text-[14px]">close</span>
               </button>
             )}
-          </div>
-
-          <span className="text-xs text-on-surface-variant/40 font-bold hidden sm:inline">or</span>
-
-          {/* Period Dropdown */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-on-surface-variant">Filter Period:</span>
-            <select
-              value={selectedPeriod}
-              onChange={(e) => {
-                setSelectedPeriod(e.target.value);
-                if (e.target.value !== 'date') {
-                  setSelectedDate('');
-                }
-              }}
-              className="bg-surface-container-high border border-outline-variant rounded-full py-1.5 px-4 text-xs font-bold text-on-surface outline-none cursor-pointer focus:border-primary"
-            >
-              <option value="all">All Sessions</option>
-              <option value="today_upcoming">Today & Upcoming</option>
-              <option value="past">Previous Days (History)</option>
-              <optgroup label="Previous Months">
-                {months.map((m) => (
-                  <option key={m} value={m}>
-                    {formatYearMonth(m)}
-                  </option>
-                ))}
-              </optgroup>
-              {selectedPeriod === 'date' && (
-                <option value="date" disabled>Selected Date</option>
-              )}
-            </select>
           </div>
         </div>
       </div>
