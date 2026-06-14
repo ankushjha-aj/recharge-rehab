@@ -1935,6 +1935,7 @@ const EmployeesTab: React.FC<{
   };
 
   const employees = users.filter((u) => u.role === 'employee');
+  const sortedEmployees = [...employees].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   const admins = users.filter((u) => u.role !== 'employee');
   const pendingLeavesCount = allLeaves.filter((l) => l.status === 'pending').length;
 
@@ -2009,10 +2010,73 @@ const EmployeesTab: React.FC<{
           {/* Employees */}
           <div>
             <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Employees ({employees.length})</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {employees.map((u) => (
-                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
-              ))}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="text-xs text-on-surface-variant uppercase tracking-wider">
+                    <th className="pb-3 px-4 font-extrabold">Name</th>
+                    <th className="pb-3 px-4 font-extrabold">Login ID</th>
+                    <th className="pb-3 px-4 font-extrabold">Specialty</th>
+                    <th className="pb-3 px-4 font-extrabold">Profile Status</th>
+                    <th className="pb-3 px-4 text-right font-extrabold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="text-on-surface">
+                  {sortedEmployees.map((u) => {
+                    const canEdit = isSuper || u.role === 'employee';
+                    return (
+                      <tr key={u.id} className="hover:bg-surface-container-high/15 transition-colors">
+                        <td className="py-3 px-4">
+                          <span 
+                            onClick={() => setViewing(u)}
+                            className="font-bold cursor-pointer hover:underline hover:text-primary transition-all text-sm"
+                          >
+                            {u.name || u.id}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-on-surface-variant">{u.id}</td>
+                        <td className="py-3 px-4 text-xs font-semibold text-on-surface-variant">{u.specialty || 'Therapist'}</td>
+                        <td className="py-3 px-4 text-xs">
+                          <span className={`font-semibold ${u.profileComplete ? 'text-[#027A48]' : 'text-[#B54708]'}`}>
+                            {u.profileComplete ? '✓ Complete' : '○ Pending'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="inline-flex items-center gap-3">
+                            {canEdit && (
+                              <button
+                                onClick={() => setEditing(u)}
+                                title="Edit Profile"
+                                className="w-8 h-8 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-primary hover:border-primary transition-all flex items-center justify-center cursor-pointer active:scale-95"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">edit</span>
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                onClick={() => reset(u)}
+                                className="text-xs font-bold px-3 py-1.5 rounded-full bg-primary-fixed text-primary hover:brightness-95 transition-all cursor-pointer active:scale-95 border border-primary/20"
+                                title="Reset Password"
+                              >
+                                RP
+                              </button>
+                            )}
+                            {isSuper && (
+                              <button
+                                onClick={() => remove(u)}
+                                className="text-xs font-bold px-3 py-1.5 rounded-full bg-[#FEE4E2] text-[#B42318] hover:brightness-95 transition-all cursor-pointer active:scale-95 border border-[#FECDCA]"
+                                title="Delete Employee"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
