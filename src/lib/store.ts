@@ -216,6 +216,15 @@ function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[
           break;
         }
       }
+      if (timeSlotColIdx === -1) {
+        // Look leftwards for timeslots
+        for (let j = 1; j <= 4; j++) {
+          if (headers[i - j] && headers[i - j].toUpperCase() === 'TIMESLOTS') {
+            timeSlotColIdx = i - j;
+            break;
+          }
+        }
+      }
     }
 
     if (timeSlotColIdx !== -1) {

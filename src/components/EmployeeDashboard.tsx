@@ -49,15 +49,18 @@ const EmployeeDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ use
     }
   };
 
-  const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => (
-    <div className="flex items-center justify-between gap-3 bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3">
-      <div className="min-w-0">
-        <p className="font-bold text-on-surface text-sm truncate">{s.parentName || 'Client'} · {s.sessionType}</p>
-        <p className="text-body-sm text-on-surface-variant">{s.mode === 'online' ? 'Online' : 'In-Clinic'} · {s.slot ? formatSlot(s.slot) : 'time TBD'}{s.date ? ` · ${s.date}` : ''}</p>
+  const SessionRow: React.FC<{ s: BookingRequest }> = ({ s }) => {
+    const isCsvBlock = s.source === 'blocked' && s.sessionType === 'CSV Schedule Block';
+    return (
+      <div className="flex items-center justify-between gap-3 bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3">
+        <div className="min-w-0">
+          <p className="font-bold text-on-surface text-sm truncate">{isCsvBlock ? `Child: ${s.parentName}` : s.parentName || 'Client'} · {s.sessionType}</p>
+          <p className="text-body-sm text-on-surface-variant">{s.mode === 'online' ? 'Online' : 'In-Clinic'} · {s.slot ? formatSlot(s.slot) : 'time TBD'}{s.date ? ` · ${s.date}` : ''}</p>
+        </div>
+        <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary-fixed text-primary shrink-0">{s.status}</span>
       </div>
-      <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary-fixed text-primary shrink-0">{s.status}</span>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex-grow bg-background px-4 md:px-8 py-8">

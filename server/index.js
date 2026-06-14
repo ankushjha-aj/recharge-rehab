@@ -137,24 +137,53 @@ async function ensureSchema() {
 }
 
 async function ensureSeedUsers() {
-  const { rows } = await pool.query('SELECT count(*)::int AS n FROM users');
-  if (rows[0].n > 0) return;
   const hash = (pw) => bcrypt.hashSync(pw, 10);
+  
+  // Ensure admins exist
   await pool.query(
     `INSERT INTO users (id, name, password_hash, role) VALUES
        ('superadmin', 'Super Admin', $1, 'super_admin'),
-       ('admin',      'Clinic Admin', $2, 'admin')`,
+       ('admin',      'Clinic Admin', $2, 'admin')
+     ON CONFLICT (id) DO NOTHING`,
     [hash('super@recharge2026'), hash('admin@recharge2026')],
   );
+
   const empHash = hash('emp@recharge2026');
-  for (const [id, name, specialty] of SEED_EMPLOYEES) {
+  const employeesToSeed = [
+    ['e1', 'SIDDHARTH AJ', 'Speech-Language Therapist'],
+    ['e2', 'PRACHI AR', 'Speech-Language Therapist'],
+    ['e3', 'KHUSHALI R3', 'Special Educator'],
+    ['e4', 'ADITI R4', 'Special Educator'],
+    ['e5', 'SULEKHA R5', 'Behavioural Therapist'],
+    ['e6', 'UMAKANTI R1', 'Audiologist / Hearing Specialist'],
+    ['e7', 'AVNI', 'Special Educator'],
+    ['e8', 'ABHIYANSHI', 'Speech Therapist'],
+    ['e9', 'AARTI', 'Behavioural Therapist'],
+    ['e10', 'SHIKHA', 'Special Educator'],
+    ['e11', 'SANIYA', 'Special Educator'],
+    ['e12', 'KUMKUM', 'Special Educator'],
+  ];
+
+  for (const [id, name, specialty] of employeesToSeed) {
+    // Upsert into users (update name & specialty, keep password_hash if exists)
     await pool.query(
-      `INSERT INTO users (id, name, password_hash, role, specialty) VALUES ($1,$2,$3,'employee',$4)`,
+      `INSERT INTO users (id, name, password_hash, role, specialty)
+       VALUES ($1, $2, $3, 'employee', $4)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, specialty = EXCLUDED.specialty`,
       [id, name, empHash, specialty],
     );
+
+    // Upsert into staff table
+    await pool.query(
+      `INSERT INTO staff (id, name, role, active)
+       VALUES ($1, $2, $3, TRUE)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role`,
+      [id, name, specialty],
+    );
   }
-  console.log('Seeded default users: superadmin, admin, e1..e10');
+  console.log('Seeded and updated default users/staff: superadmin, admin, e1..e12');
 }
+
 
 // ---- action handlers -------------------------------------------------------
 async function doLogin(p) {

@@ -2416,13 +2416,15 @@ const EmployeeDashboardTab: React.FC<{ user: User; sessions: BookingRequest[] }>
                       {isBlocked ? (
                         <div>
                           <p className="font-extrabold text-[#B54708] text-sm flex items-center gap-1.5 flex-wrap">
-                            <span>Blocked Slot: {s.parentName}</span>
+                            <span>{s.sessionType === 'CSV Schedule Block' ? `Child: ${s.parentName}` : `Blocked Slot: ${s.parentName}`}</span>
                             <span className="text-[10px] px-2 py-0.5 bg-[#FEF0C7] text-[#B54708] rounded-full uppercase tracking-wider font-extrabold border border-[#FDE293]">
                               {s.sessionType}
                             </span>
                           </p>
                           <p className="text-xs text-on-surface-variant/80 mt-1">
-                            This time slot has been blocked for you by the Admin. No public bookings can be placed here.
+                            {s.sessionType === 'CSV Schedule Block'
+                              ? `This slot is scheduled for your daily session with child ${s.parentName}.`
+                              : 'This time slot has been blocked for you by the Admin. No public bookings can be placed here.'}
                           </p>
                         </div>
                       ) : (
@@ -2533,7 +2535,7 @@ const EmployeeSessionsTab: React.FC<{ sessions: BookingRequest[] }> = ({ session
       >
         <div className="min-w-0">
           <p className="font-bold text-on-surface text-sm truncate flex items-center gap-1.5 flex-wrap">
-            <span>{s.parentName || 'Client'}</span>
+            <span>{isBlocked && s.sessionType === 'CSV Schedule Block' ? `Child: ${s.parentName}` : s.parentName || 'Client'}</span>
             <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
               isBlocked ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-primary/10 text-primary'
             }`}>
