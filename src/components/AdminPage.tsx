@@ -1880,24 +1880,21 @@ const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => voi
 // ---------------------------------------------------------------------------
 // Employees / accounts
 // ---------------------------------------------------------------------------
-const EmployeesTab: React.FC<{
-  users: User[];
+const getInitials = (name: string): string => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + (parts[parts.length - 1][0] || '')).toUpperCase();
+};
+
+const CreateUserModal: React.FC<{
   isSuper: boolean;
-  allLeaves: LeaveRequest[];
-  onChange: () => void;
-}> = ({ users, isSuper, allLeaves, onChange }) => {
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ isSuper, onClose, onSaved }) => {
   const [form, setForm] = useState({ id: '', name: '', password: '', role: 'employee' as Role, specialty: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<User | null>(null);
-  const [viewing, setViewing] = useState<User | null>(null);
-  const [subTab, setSubTab] = useState<'accounts' | 'leaves'>('accounts');
-
-  useEffect(() => {
-    if (subTab === 'leaves') {
-      markLeavesSeen().catch(console.error);
-    }
-  }, [subTab]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1905,14 +1902,123 @@ const EmployeesTab: React.FC<{
     setBusy(true);
     try {
       await createUser({ id: form.id.trim(), name: form.name.trim(), password: form.password, role: form.role, specialty: form.specialty.trim() });
-      setForm({ id: '', name: '', password: '', role: 'employee', specialty: '' });
-      onChange();
+      onSaved();
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : 'Failed to create');
     } finally {
       setBusy(false);
     }
   };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 grid place-items-center p-4">
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] w-full max-w-lg p-6 shadow-2xl relative animate-in fade-in duration-200">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 w-8 h-8 rounded-full grid place-items-center hover:bg-surface-container-high transition-colors cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[20px] text-on-surface-variant">close</span>
+        </button>
+        <h3 className="text-headline-sm font-bold text-on-surface mb-6 flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[28px]">person_add</span>
+          Create Account
+        </h3>
+        
+        <form onSubmit={add} className="space-y-4">
+          <div className="space-y-3">
+            <Field label="Login ID">
+              <input 
+                value={form.id} 
+                onChange={(e) => setForm({ ...form, id: e.target.value })} 
+                placeholder="e.g. EMP013 or ADM002" 
+                className={inputCls} 
+                required 
+              />
+            </Field>
+            <Field label="Full name">
+              <input 
+                value={form.name} 
+                onChange={(e) => setForm({ ...form, name: e.target.value })} 
+                placeholder="e.g. Asha Verma" 
+                className={inputCls} 
+                required 
+              />
+            </Field>
+            <Field label="Password">
+              <input 
+                value={form.password} 
+                onChange={(e) => setForm({ ...form, password: e.target.value })} 
+                placeholder="Set a password" 
+                className={inputCls} 
+                required 
+              />
+            </Field>
+            <Field label="Role">
+              <select 
+                value={form.role} 
+                onChange={(e) => setForm({ ...form, role: e.target.value as Role })} 
+                className={`${inputCls} appearance-none cursor-pointer`} 
+                disabled={!isSuper}
+              >
+                <option value="employee">Employee</option>
+                {isSuper && <option value="admin">Admin</option>}
+                {isSuper && <option value="super_admin">Super Admin</option>}
+              </select>
+            </Field>
+            {form.role === 'employee' && (
+              <Field label="Specialty">
+                <input 
+                  value={form.specialty} 
+                  onChange={(e) => setForm({ ...form, specialty: e.target.value })} 
+                  placeholder="e.g. Speech Therapist" 
+                  className={inputCls} 
+                  required 
+                />
+              </Field>
+            )}
+          </div>
+          {!isSuper && <p className="text-[11px] text-on-surface-variant mt-2">Admins can create employee accounts. Only the super admin can create admins.</p>}
+          {err && <p className="text-body-sm text-[#B42318] mt-2">{err}</p>}
+          
+          <div className="flex justify-end gap-2 pt-4 border-t border-outline-variant/30 mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-full font-bold text-sm border border-outline-variant text-on-surface-variant hover:bg-surface-container-high/20 active:scale-95 transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              disabled={busy} 
+              className="bg-primary text-on-primary px-5 py-2 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 flex items-center gap-1.5 shadow cursor-pointer"
+            >
+              {busy ? 'Creating…' : 'Create Account'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const EmployeesTab: React.FC<{
+  users: User[];
+  isSuper: boolean;
+  allLeaves: LeaveRequest[];
+  onChange: () => void;
+}> = ({ users, isSuper, allLeaves, onChange }) => {
+  const [editing, setEditing] = useState<User | null>(null);
+  const [viewing, setViewing] = useState<User | null>(null);
+  const [subTab, setSubTab] = useState<'accounts' | 'leaves'>('accounts');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  useEffect(() => {
+    if (subTab === 'leaves') {
+      markLeavesSeen().catch(console.error);
+    }
+  }, [subTab]);
 
   const toggleActive = async (u: User) => {
     await updateUser(u.id, { active: !u.active });
@@ -1936,67 +2042,64 @@ const EmployeesTab: React.FC<{
 
   const employees = users.filter((u) => u.role === 'employee');
   const sortedEmployees = [...employees].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const filteredEmployees = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return sortedEmployees;
+    return sortedEmployees.filter(
+      (u) =>
+        (u.id || '').toLowerCase().includes(q) ||
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.specialty || '').toLowerCase().includes(q)
+    );
+  }, [sortedEmployees, searchQuery]);
+
   const admins = users.filter((u) => u.role !== 'employee');
   const pendingLeavesCount = allLeaves.filter((l) => l.status === 'pending').length;
 
   return (
     <div className="space-y-6">
       {/* Sub tabs switcher */}
-      <div className="flex gap-2 border-b border-outline-variant/20 pb-3 flex-wrap">
+      <div className="flex justify-between items-center border-b border-outline-variant/20 pb-3 flex-wrap gap-2">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setSubTab('accounts')}
+            className={`px-4 py-2 rounded-full font-bold text-xs transition-colors cursor-pointer ${
+              subTab === 'accounts'
+                ? 'bg-primary text-on-primary shadow-sm'
+                : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Manage Accounts
+          </button>
+          <button
+            onClick={() => setSubTab('leaves')}
+            className={`px-4 py-2 rounded-full font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+              subTab === 'leaves'
+                ? 'bg-primary text-on-primary shadow-sm'
+                : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Leave Requests
+            {pendingLeavesCount > 0 && (
+              <span className="bg-[#F04438] text-white text-[9px] font-black w-4.5 h-4.5 rounded-full grid place-items-center animate-bounce">
+                {pendingLeavesCount}
+              </span>
+            )}
+          </button>
+        </div>
+        
+        {/* Create account button on the right side */}
         <button
-          onClick={() => setSubTab('accounts')}
-          className={`px-4 py-2 rounded-full font-bold text-xs transition-colors cursor-pointer ${
-            subTab === 'accounts'
-              ? 'bg-primary text-on-primary shadow-sm'
-              : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
-          }`}
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2 rounded-full font-bold text-xs bg-primary text-on-primary hover:brightness-95 active:scale-95 transition flex items-center gap-1.5 cursor-pointer shadow-sm"
         >
-          Manage Accounts
-        </button>
-        <button
-          onClick={() => setSubTab('leaves')}
-          className={`px-4 py-2 rounded-full font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
-            subTab === 'leaves'
-              ? 'bg-primary text-on-primary shadow-sm'
-              : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
-          }`}
-        >
-          Leave Requests
-          {pendingLeavesCount > 0 && (
-            <span className="bg-[#F04438] text-white text-[9px] font-black w-4.5 h-4.5 rounded-full grid place-items-center animate-bounce">
-              {pendingLeavesCount}
-            </span>
-          )}
+          <span className="material-symbols-outlined text-[16px]">person_add</span>
+          Create Account
         </button>
       </div>
 
       {subTab === 'accounts' ? (
         <div className="space-y-8">
-          {/* Create */}
-          <form onSubmit={add} className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm">
-            <h3 className="text-headline-sm font-bold text-on-surface mb-4">Create account</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <Field label="Login ID"><input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="e.g. asha" className={inputCls} /></Field>
-              <Field label="Full name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Asha Verma" className={inputCls} /></Field>
-              <Field label="Password"><input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="set a password" className={inputCls} /></Field>
-              <Field label="Role">
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={`${inputCls} appearance-none cursor-pointer`} disabled={!isSuper}>
-                  <option value="employee">Employee</option>
-                  {isSuper && <option value="admin">Admin</option>}
-                  {isSuper && <option value="super_admin">Super Admin</option>}
-                </select>
-              </Field>
-              {form.role === 'employee' && (
-                <Field label="Specialty"><input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} placeholder="e.g. Speech Therapist" className={inputCls} /></Field>
-              )}
-            </div>
-            {!isSuper && <p className="text-[11px] text-on-surface-variant mt-2">Admins can create employee accounts. Only the super admin can create admins.</p>}
-            {err && <p className="text-body-sm text-[#B42318] mt-2">{err}</p>}
-            <button type="submit" disabled={busy} className="mt-4 bg-primary text-on-primary px-5 py-2.5 rounded-full font-bold text-sm hover:brightness-95 active:scale-95 transition disabled:opacity-60 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[18px]">person_add</span>{busy ? 'Creating…' : 'Create'}
-            </button>
-          </form>
-
           {/* Admin/super accounts */}
           <div>
             <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Admin accounts</h3>
@@ -2008,8 +2111,23 @@ const EmployeesTab: React.FC<{
           </div>
 
           {/* Employees */}
-          <div>
-            <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Employees ({employees.length})</h3>
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+              <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold">
+                Employees ({filteredEmployees.length}{searchQuery ? ` of ${employees.length}` : ''})
+              </h3>
+              <div className="relative w-full sm:w-64">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+                <input
+                  type="text"
+                  placeholder="Search ID, name, specialty..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest text-xs text-on-surface focus:outline-none focus:border-primary transition-all shadow-sm"
+                />
+              </div>
+            </div>
+            
             <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-5 shadow-sm overflow-x-auto">
               <table className="w-full text-left text-sm border-collapse">
                 <thead>
@@ -2022,17 +2140,26 @@ const EmployeesTab: React.FC<{
                   </tr>
                 </thead>
                 <tbody className="text-on-surface">
-                  {sortedEmployees.map((u) => {
+                  {filteredEmployees.map((u) => {
                     const canEdit = isSuper || u.role === 'employee';
                     return (
                       <tr key={u.id} className="hover:bg-surface-container-high/15 transition-colors">
                         <td className="py-3 px-4">
-                          <span 
-                            onClick={() => setViewing(u)}
-                            className="font-bold cursor-pointer hover:underline hover:text-primary transition-all text-sm"
-                          >
-                            {u.name || u.id}
-                          </span>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-primary-fixed/50 text-primary grid place-items-center text-xs font-black uppercase shrink-0 overflow-hidden select-none border border-outline-variant/30">
+                              {u.profileImage ? (
+                                <img src={u.profileImage} alt={u.name || u.id} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{getInitials(u.name || u.id)}</span>
+                              )}
+                            </div>
+                            <span 
+                              onClick={() => setViewing(u)}
+                              className="font-bold cursor-pointer hover:underline hover:text-primary transition-all text-sm"
+                            >
+                              {u.name || u.id}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-3 px-4 font-mono text-xs text-on-surface-variant">{u.id}</td>
                         <td className="py-3 px-4 text-xs font-semibold text-on-surface-variant">{u.specialty || 'Therapist'}</td>
@@ -2082,6 +2209,17 @@ const EmployeesTab: React.FC<{
         </div>
       ) : (
         <LeavesApprovalList leaves={allLeaves} isSuper={isSuper} onRefresh={onChange} />
+      )}
+
+      {showCreateModal && (
+        <CreateUserModal
+          isSuper={isSuper}
+          onClose={() => setShowCreateModal(false)}
+          onSaved={() => {
+            setShowCreateModal(false);
+            onChange();
+          }}
+        />
       )}
 
       {viewing && (

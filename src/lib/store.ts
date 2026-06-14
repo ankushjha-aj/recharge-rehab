@@ -374,16 +374,16 @@ export function takenTimesFor(avail: DayAvailability, specialistId: string, spec
 
 // Local-only fallback specialist list (used when no backend is configured).
 export const DEFAULT_STAFF: Staff[] = [
-  { id: 'e1', name: 'Employee 1', role: 'Speech-Language Therapist', active: true },
-  { id: 'e2', name: 'Employee 2', role: 'Speech-Language Therapist', active: true },
-  { id: 'e3', name: 'Employee 3', role: 'Special Educator', active: true },
-  { id: 'e4', name: 'Employee 4', role: 'Special Educator', active: true },
-  { id: 'e5', name: 'Employee 5', role: 'Behavioural Therapist', active: true },
-  { id: 'e6', name: 'Employee 6', role: 'Audiologist / Hearing Specialist', active: true },
-  { id: 'e7', name: 'Employee 7', role: 'Special Educator', active: true },
-  { id: 'e8', name: 'Employee 8', role: 'Speech Therapist', active: true },
-  { id: 'e9', name: 'Employee 9', role: 'Counselor / Parent Trainer', active: true },
-  { id: 'e10', name: 'Employee 10', role: 'Counselor / Parent Trainer', active: true },
+  { id: 'EMP001', name: 'Employee 1', role: 'Speech-Language Therapist', active: true },
+  { id: 'EMP002', name: 'Employee 2', role: 'Speech-Language Therapist', active: true },
+  { id: 'EMP003', name: 'Employee 3', role: 'Special Educator', active: true },
+  { id: 'EMP004', name: 'Employee 4', role: 'Special Educator', active: true },
+  { id: 'EMP005', name: 'Employee 5', role: 'Behavioural Therapist', active: true },
+  { id: 'EMP006', name: 'Employee 6', role: 'Audiologist / Hearing Specialist', active: true },
+  { id: 'EMP007', name: 'Employee 7', role: 'Special Educator', active: true },
+  { id: 'EMP008', name: 'Employee 8', role: 'Speech Therapist', active: true },
+  { id: 'EMP009', name: 'Employee 9', role: 'Counselor / Parent Trainer', active: true },
+  { id: 'EMP010', name: 'Employee 10', role: 'Counselor / Parent Trainer', active: true },
 ];
 
 // --- config -----------------------------------------------------------------

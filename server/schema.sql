@@ -47,16 +47,16 @@ CREATE INDEX IF NOT EXISTS blocked_date_source_idx ON blocked_slots (date, sourc
 
 -- Seed the 10 reference staff once (no-op if they already exist).
 INSERT INTO staff (id, name, role, active) VALUES
-  ('e1',  'Employee 1',  'Speech-Language Therapist',        TRUE),
-  ('e2',  'Employee 2',  'Speech-Language Therapist',        TRUE),
-  ('e3',  'Employee 3',  'Special Educator',                 TRUE),
-  ('e4',  'Employee 4',  'Special Educator',                 TRUE),
-  ('e5',  'Employee 5',  'Behavioural Therapist',            TRUE),
-  ('e6',  'Employee 6',  'Audiologist / Hearing Specialist', TRUE),
-  ('e7',  'Employee 7',  'Special Educator',                 TRUE),
-  ('e8',  'Employee 8',  'Speech Therapist',                 TRUE),
-  ('e9',  'Employee 9',  'Behavioural Therapist',            TRUE),
-  ('e10', 'Employee 10', 'Counselor / Parent Trainer',       TRUE)
+  ('EMP001',  'Employee 1',  'Speech-Language Therapist',        TRUE),
+  ('EMP002',  'Employee 2',  'Speech-Language Therapist',        TRUE),
+  ('EMP003',  'Employee 3',  'Special Educator',                 TRUE),
+  ('EMP004',  'Employee 4',  'Special Educator',                 TRUE),
+  ('EMP005',  'Employee 5',  'Behavioural Therapist',            TRUE),
+  ('EMP006',  'Employee 6',  'Audiologist / Hearing Specialist', TRUE),
+  ('EMP007',  'Employee 7',  'Special Educator',                 TRUE),
+  ('EMP008',  'Employee 8',  'Speech Therapist',                 TRUE),
+  ('EMP009',  'Employee 9',  'Behavioural Therapist',            TRUE),
+  ('EMP010', 'Employee 10', 'Counselor / Parent Trainer',       TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- "New item" flag for the admin notification badges/popup.

@@ -187,29 +187,83 @@ async function ensureSchema() {
 async function ensureSeedUsers() {
   const hash = (pw) => bcrypt.hashSync(pw, 10);
   
+  // Migrate existing IDs if any
+  const migrations = [
+    ['admin', 'ADM001'],
+    ['e1', 'EMP001'],
+    ['e2', 'EMP002'],
+    ['e3', 'EMP003'],
+    ['e4', 'EMP004'],
+    ['e5', 'EMP005'],
+    ['e6', 'EMP006'],
+    ['e7', 'EMP007'],
+    ['e8', 'EMP008'],
+    ['e9', 'EMP009'],
+    ['e10', 'EMP010'],
+    ['e11', 'EMP011'],
+    ['e12', 'EMP012'],
+  ];
+
+  for (const [oldId, newId] of migrations) {
+    const { rows: oldExists } = await pool.query('SELECT 1 FROM users WHERE id = $1', [oldId]);
+    if (oldExists.length > 0) {
+      console.log(`Migrating old user ID ${oldId} to ${newId} in database...`);
+      // Delete newId if it somehow exists to prevent duplicates/errors
+      await pool.query('DELETE FROM users WHERE id = $1', [newId]);
+      
+      // Copy users entry to newId
+      await pool.query(
+        `INSERT INTO users (id, name, password_hash, role, active, specialty, gender, qualifications, experience, email, phone, profile_complete, created_at, profile_image, parent_name, parent_relation, parent_phone, address, extra_phone, education_10th, education_12th, education_grad, is_first_job, past_experience, base_salary)
+         SELECT $2, name, password_hash, role, active, specialty, gender, qualifications, experience, email, phone, profile_complete, created_at, profile_image, parent_name, parent_relation, parent_phone, address, extra_phone, education_10th, education_12th, education_grad, is_first_job, past_experience, base_salary
+         FROM users WHERE id = $1 ON CONFLICT (id) DO NOTHING`,
+        [oldId, newId]
+      );
+      
+      // Upsert into staff table for newId
+      await pool.query(
+        `INSERT INTO staff (id, name, role, active, base_salary)
+         SELECT $2, name, role, active, base_salary FROM staff WHERE id = $1
+         ON CONFLICT (id) DO NOTHING`,
+        [oldId, newId]
+      );
+
+      // Update foreign key references
+      await pool.query('UPDATE sessions SET user_id = $2 WHERE user_id = $1', [oldId, newId]);
+      await pool.query('UPDATE salary_slips SET user_id = $2 WHERE user_id = $1', [oldId, newId]);
+      await pool.query('UPDATE leave_requests SET user_id = $2 WHERE user_id = $1', [oldId, newId]);
+      await pool.query('UPDATE attendance SET user_id = $2 WHERE user_id = $1', [oldId, newId]);
+      await pool.query('UPDATE bookings SET specialist_id = $2 WHERE specialist_id = $1', [oldId, newId]);
+      await pool.query('UPDATE blocked_slots SET staff_id = $2 WHERE staff_id = $1', [oldId, newId]);
+      
+      // Delete old records
+      await pool.query('DELETE FROM users WHERE id = $1', [oldId]);
+      await pool.query('DELETE FROM staff WHERE id = $1', [oldId]);
+    }
+  }
+
   // Ensure admins exist
   await pool.query(
     `INSERT INTO users (id, name, password_hash, role) VALUES
        ('superadmin', 'Super Admin', $1, 'super_admin'),
-       ('admin',      'Clinic Admin', $2, 'admin')
+       ('ADM001',      'Clinic Admin', $2, 'admin')
      ON CONFLICT (id) DO NOTHING`,
     [hash('super@recharge2026'), hash('admin@recharge2026')],
   );
 
   const empHash = hash('emp@recharge2026');
   const employeesToSeed = [
-    ['e1', 'SIDDHARTH AJ', 'Speech-Language Therapist'],
-    ['e2', 'PRACHI AR', 'Speech-Language Therapist'],
-    ['e3', 'KHUSHALI R3', 'Therapist'],
-    ['e4', 'ADITI R4', 'Therapist'],
-    ['e5', 'SULEKHA R5', 'Behavioural Therapist'],
-    ['e6', 'UMAKANTI R1', 'Audiologist / Hearing Specialist'],
-    ['e7', 'AVNI', 'Therapist'],
-    ['e8', 'ABHIYANSHI', 'Speech Therapist'],
-    ['e9', 'AARTI', 'Behavioural Therapist'],
-    ['e10', 'SHIKHA', 'Special Educator'],
-    ['e11', 'SANIYA', 'Special Educator'],
-    ['e12', 'KUMKUM', 'Special Educator'],
+    ['EMP001', 'SIDDHARTH AJ', 'Speech-Language Therapist'],
+    ['EMP002', 'PRACHI AR', 'Speech-Language Therapist'],
+    ['EMP003', 'KHUSHALI R3', 'Therapist'],
+    ['EMP004', 'ADITI R4', 'Therapist'],
+    ['EMP005', 'SULEKHA R5', 'Behavioural Therapist'],
+    ['EMP006', 'UMAKANTI R1', 'Audiologist / Hearing Specialist'],
+    ['EMP007', 'AVNI', 'Therapist'],
+    ['EMP008', 'ABHIYANSHI', 'Speech Therapist'],
+    ['EMP009', 'AARTI', 'Behavioural Therapist'],
+    ['EMP010', 'SHIKHA', 'Special Educator'],
+    ['EMP011', 'SANIYA', 'Special Educator'],
+    ['EMP012', 'KUMKUM', 'Special Educator'],
   ];
 
   for (const [id, name, specialty] of employeesToSeed) {
@@ -229,7 +283,7 @@ async function ensureSeedUsers() {
       [id, name, specialty],
     );
   }
-  console.log('Seeded and updated default users/staff: superadmin, admin, e1..e12');
+  console.log('Seeded and updated default users/staff: superadmin, ADM001, EMP001..EMP012');
 }
 
 
