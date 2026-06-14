@@ -1105,7 +1105,7 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string 
           {tab === 'requests' && (
             <RequestsTab bookings={bookings} staffName={staffName} isSuper={isSuper} unseenSessions={unseenSessions} unseenConsults={unseenConsults} onChange={refresh} query={query} users={users} />
           )}
-          {tab === 'employees' && <EmployeesTab users={users} isSuper={isSuper} allLeaves={allLeaves} onChange={refresh} />}
+          {tab === 'employees' && <EmployeesTab users={users} isSuper={isSuper} allLeaves={allLeaves} bookings={bookings} onChange={refresh} />}
           {tab === 'availability' && <AvailabilityTab users={users} />}
           {tab === 'payments' && <PaymentsTab bookings={bookings} onChange={refresh} />}
           {tab === 'compensation' && <CompensationTab users={users} allLeaves={allLeaves} onChange={refresh} />}
@@ -1835,8 +1835,222 @@ const UserProfileModal: React.FC<{ u: User; onClose: () => void; onEdit: () => v
   );
 };
 
-const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => void; onReset: (u: User) => void; onRemove: (u: User) => void; onEdit: (u: User) => void; onView: (u: User) => void }> = ({ u, isSuper, onToggle, onReset, onRemove, onEdit, onView }) => {
+const UserCard: React.FC<{
+  u: User;
+  isSuper: boolean;
+  bookings: BookingRequest[];
+  allLeaves: LeaveRequest[];
+  onToggle: (u: User) => void;
+  onReset: (u: User) => void;
+  onRemove: (u: User) => void;
+  onEdit: (u: User) => void;
+  onView: (u: User) => void;
+  onChange: () => void;
+}> = ({ u, isSuper, bookings, allLeaves, onToggle, onReset, onRemove, onEdit, onView, onChange }) => {
   const canEdit = isSuper || u.role === 'employee';
+  const [acting, setActing] = useState<string | null>(null);
+
+  const handleLeaveAction = async (id: string, status: 'approved' | 'rejected') => {
+    setActing(id);
+    try {
+      await updateLeaveStatus(id, status);
+      onChange();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setActing(null);
+    }
+  };
+
+  if (u.role === 'employee') {
+    const employeeSessions = bookings.filter(b => b.specialistId === u.id && b.status !== 'cancelled' && b.source !== 'blocked');
+    
+    const approvedLeaves = allLeaves.filter(l => l.userId === u.id && l.status === 'approved');
+    let totalLeaveDays = 0;
+    approvedLeaves.forEach(l => {
+      try {
+        const start = new Date(l.startDate + 'T00:00:00');
+        const end = new Date(l.endDate + 'T00:00:00');
+        const diff = end.getTime() - start.getTime();
+        totalLeaveDays += Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1);
+      } catch {
+        totalLeaveDays += 1;
+      }
+    });
+
+    const pendingLeaves = allLeaves.filter(l => l.userId === u.id && l.status === 'pending');
+
+    return (
+      <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 shadow-sm hover:shadow-md transition-all flex flex-col lg:flex-row items-stretch justify-between gap-6 w-full">
+        {/* Left Side: General Info & Actions */}
+        <div className="flex-grow flex flex-col justify-between space-y-4">
+          <div className="flex items-start gap-4">
+            <div
+              onClick={() => onView(u)}
+              className="w-12 h-12 rounded-full bg-primary-fixed grid place-items-center text-primary shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all"
+              title="View full profile"
+            >
+              <span className="material-symbols-outlined text-[24px]">badge</span>
+            </div>
+            <div className="min-w-0">
+              <h4
+                onClick={() => onView(u)}
+                className="font-black text-lg text-on-surface cursor-pointer hover:underline hover:text-primary transition-all leading-tight"
+                title="View full profile"
+              >
+                {u.name || u.id}
+              </h4>
+              <p className="text-body-sm text-on-surface-variant mt-0.5">
+                ID: <strong className="font-bold text-on-surface">{u.id}</strong> · {u.specialty || 'Therapist'}
+              </p>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                  u.profileComplete ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-[#FEF0C7] text-[#B54708]'
+                }`}>
+                  {u.profileComplete ? 'Complete Profile' : 'Pending Profile'}
+                </span>
+                <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                  u.active ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-surface-container-high text-on-surface-variant'
+                }`}>
+                  {u.active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats Boxes (Glassmorphic mini-cards) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-primary/5 border border-primary/10 rounded-2xl p-3 text-center">
+              <span className="block text-[9px] font-extrabold uppercase tracking-wider text-primary">Total Sessions</span>
+              <span className="block text-lg font-black text-primary mt-1">{employeeSessions.length}</span>
+            </div>
+            <div className="bg-[#FEE4E2]/50 border border-[#FECDCA] rounded-2xl p-3 text-center">
+              <span className="block text-[9px] font-extrabold uppercase tracking-wider text-[#B42318]">Leaves Taken</span>
+              <span className="block text-lg font-black text-[#B42318] mt-1">{totalLeaveDays} day{totalLeaveDays === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2 pt-2">
+            {canEdit && (
+              <button
+                onClick={() => onToggle(u)}
+                className={`text-xs font-black uppercase tracking-wider px-4 py-2 rounded-full border transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95 ${
+                  u.active
+                    ? 'bg-[#D1FADF]/20 border-[#A6F4C5] text-[#027A48] hover:bg-[#D1FADF]/40'
+                    : 'bg-surface-container-high/40 border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">{u.active ? 'toggle_on' : 'toggle_off'}</span>
+                {u.active ? 'Deactivate' : 'Activate'}
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => onEdit(u)}
+                className="text-xs font-black uppercase tracking-wider px-4 py-2 rounded-full border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[16px]">edit</span>
+                Edit Profile
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => onReset(u)}
+                className="text-xs font-black uppercase tracking-wider px-4 py-2 rounded-full border border-[#FDE293] bg-[#FEF0C7]/40 text-[#B54708] hover:bg-[#FEF0C7] transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[16px]">lock_reset</span>
+                Reset Password
+              </button>
+            )}
+            {isSuper && (
+              <button
+                onClick={() => onRemove(u)}
+                className="text-xs font-black uppercase tracking-wider px-4 py-2 rounded-full border border-[#FECDCA] bg-[#FEE4E2]/40 text-[#B42318] hover:bg-[#FEE4E2] transition-all duration-200 flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                Delete Account
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="w-px bg-outline-variant/30 hidden lg:block self-stretch mx-1" />
+
+        {/* Right Side: Photo and Pending Leave Actions */}
+        <div className="w-full lg:w-72 flex-shrink-0 flex flex-col justify-between items-center lg:items-stretch gap-4">
+          {/* Photo */}
+          <div className="flex items-center justify-center">
+            {u.profileImage ? (
+              <img
+                src={u.profileImage}
+                alt={u.name || u.id}
+                className="w-20 h-20 rounded-full object-cover border border-outline-variant shadow-sm hover:scale-105 transition duration-200 select-none"
+              />
+            ) : (
+              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-primary/10 to-primary/20 text-primary font-black text-2xl flex items-center justify-center border border-outline-variant/60 shadow-inner select-none">
+                {u.name ? u.name.substring(0, 2).toUpperCase() : u.id.substring(0, 2).toUpperCase()}
+              </div>
+            )}
+          </div>
+
+          {/* Leave request approval / status container */}
+          <div className="w-full flex-grow flex flex-col justify-end">
+            {pendingLeaves.length > 0 ? (
+              <div className="bg-[#FEF0C7]/40 border border-[#FDE293] rounded-2xl p-4 space-y-3 shadow-sm w-full">
+                <div className="flex items-center gap-1.5 text-[#B54708]">
+                  <span className="material-symbols-outlined text-[16px] animate-pulse">event_busy</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider">Pending Leave Request</span>
+                </div>
+                {pendingLeaves.slice(0, 1).map((l) => (
+                  <div key={l.id} className="space-y-2.5">
+                    <div className="text-[11px] font-medium text-on-surface">
+                      <div className="font-bold capitalize text-primary text-[10px] bg-primary/5 border border-primary/10 px-2 py-0.5 rounded-md inline-block mb-1">
+                        {l.leaveType}
+                      </div>
+                      <div className="font-semibold">{l.startDate} to {l.endDate}</div>
+                      {l.reason && (
+                        <p className="text-[10px] text-on-surface-variant/85 italic mt-1 bg-surface-container-lowest p-2 rounded-lg border border-outline-variant/20 max-h-[60px] overflow-y-auto">
+                          "{l.reason}"
+                        </p>
+                      )}
+                    </div>
+                    {isSuper ? (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          disabled={acting === l.id}
+                          onClick={() => handleLeaveAction(l.id, 'approved')}
+                          className="flex-1 bg-[#D1FADF]/60 border border-[#A6F4C5] text-[#027A48] hover:bg-[#027A48] hover:text-white py-2 rounded-xl text-xs font-black uppercase tracking-wider transition disabled:opacity-60 cursor-pointer shadow-sm flex items-center justify-center gap-1 active:scale-95"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                          Approve
+                        </button>
+                        <button
+                          disabled={acting === l.id}
+                          onClick={() => handleLeaveAction(l.id, 'rejected')}
+                          className="flex-1 bg-[#FEE4E2]/60 border border-[#FECDCA] text-[#B42318] hover:bg-[#B42318] hover:text-white py-2 rounded-xl text-xs font-black uppercase tracking-wider transition disabled:opacity-60 cursor-pointer shadow-sm flex items-center justify-center gap-1 active:scale-95"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">cancel</span>
+                          Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-[#B54708] font-bold bg-[#FEF0C7] px-2 py-1 rounded-lg text-center select-none">
+                        Requires Super Admin Action
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Admin Card (original layout)
   return (
     <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.25rem] p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -1846,7 +2060,7 @@ const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => voi
             className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center text-primary shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all"
             title="View full profile"
           >
-            <span className="material-symbols-outlined text-[20px]">{u.role === 'employee' ? 'badge' : 'shield_person'}</span>
+            <span className="material-symbols-outlined text-[20px]">shield_person</span>
           </div>
           <div className="min-w-0">
             <p
@@ -1856,17 +2070,11 @@ const UserCard: React.FC<{ u: User; isSuper: boolean; onToggle: (u: User) => voi
             >
               {u.name || u.id}
             </p>
-            <p className="text-body-sm text-on-surface-variant truncate">{u.id} · {u.specialty || ROLE_LABEL[u.role]}</p>
+            <p className="text-body-sm text-on-surface-variant truncate">{u.id} · {ROLE_LABEL[u.role]}</p>
           </div>
         </div>
-        <Pill cls={u.role === 'super_admin' ? 'bg-[#FEE4E2] text-[#B42318]' : u.role === 'admin' ? 'bg-primary-fixed text-primary' : 'bg-surface-container-high text-on-surface-variant'}>{ROLE_LABEL[u.role]}</Pill>
+        <Pill cls={u.role === 'super_admin' ? 'bg-[#FEE4E2] text-[#B42318]' : 'bg-primary-fixed text-primary'}>{ROLE_LABEL[u.role]}</Pill>
       </div>
-      {u.role === 'employee' && (
-        <p className="text-[11px] text-on-surface-variant/80 mt-2">
-          {u.profileComplete ? '✓ Profile complete' : '○ Profile pending'}
-          {u.experience ? ` · ${u.experience}` : ''}
-        </p>
-      )}
       <div className="flex flex-wrap gap-1.5 mt-3">
         {canEdit && <button onClick={() => onToggle(u)} className={`text-xs font-bold px-3 py-1.5 rounded-full ${u.active ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-surface-container-high text-on-surface-variant'}`}>{u.active ? 'Active' : 'Inactive'}</button>}
         {canEdit && <button onClick={() => onEdit(u)} className="text-xs font-bold px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:text-primary">Edit</button>}
@@ -1884,8 +2092,9 @@ const EmployeesTab: React.FC<{
   users: User[];
   isSuper: boolean;
   allLeaves: LeaveRequest[];
+  bookings: BookingRequest[];
   onChange: () => void;
-}> = ({ users, isSuper, allLeaves, onChange }) => {
+}> = ({ users, isSuper, allLeaves, bookings, onChange }) => {
   const [form, setForm] = useState({ id: '', name: '', password: '', role: 'employee' as Role, specialty: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2001,17 +2210,41 @@ const EmployeesTab: React.FC<{
             <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Admin accounts</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {admins.map((u) => (
-                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
+                <UserCard
+                  key={u.id}
+                  u={u}
+                  isSuper={isSuper}
+                  bookings={[]}
+                  allLeaves={[]}
+                  onToggle={toggleActive}
+                  onReset={reset}
+                  onRemove={remove}
+                  onEdit={setEditing}
+                  onView={setViewing}
+                  onChange={onChange}
+                />
               ))}
             </div>
           </div>
 
           {/* Employees */}
-          <div>
-            <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-3">Employees ({employees.length})</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-4">
+            <h3 className="text-label-md uppercase tracking-wider text-primary font-extrabold">Employees ({employees.length})</h3>
+            <div className="flex flex-col gap-4">
               {employees.map((u) => (
-                <UserCard key={u.id} u={u} isSuper={isSuper} onToggle={toggleActive} onReset={reset} onRemove={remove} onEdit={setEditing} onView={setViewing} />
+                <UserCard
+                  key={u.id}
+                  u={u}
+                  isSuper={isSuper}
+                  bookings={bookings}
+                  allLeaves={allLeaves}
+                  onToggle={toggleActive}
+                  onReset={reset}
+                  onRemove={remove}
+                  onEdit={setEditing}
+                  onView={setViewing}
+                  onChange={onChange}
+                />
               ))}
             </div>
           </div>
