@@ -847,32 +847,36 @@ const AdminDashboard: React.FC<{ user: User; onLogout: () => void; path: string 
         </div>
 
         {/* Search Bar in the middle */}
-        <div className="flex-1 max-w-[140px] xs:max-w-[180px] sm:max-w-xs md:max-w-md mx-4 lg:mx-8">
-          <div className="relative flex items-center w-full bg-surface-container-high/40 hover:bg-surface-container-high/70 focus-within:bg-surface-container-high/90 focus-within:ring-2 focus-within:ring-primary/20 border border-outline-variant/30 rounded-full px-3 py-1.5 transition-all duration-200">
-            <span className="material-symbols-outlined text-on-surface-variant text-[18px] mr-2 select-none">search</span>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (user.role !== 'employee' && tab !== 'requests') {
-                  navigateToTab('requests');
-                }
-              }}
-              placeholder="Search bookings..."
-              className="bg-transparent border-none outline-none text-xs sm:text-sm text-on-surface placeholder-on-surface-variant/50 w-full focus:ring-0"
-            />
-            {query && (
-              <button
-                onClick={() => setQuery('')}
-                className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-outline-variant/30 text-on-surface-variant transition-colors"
-                title="Clear search"
-              >
-                <span className="material-symbols-outlined text-[14px]">close</span>
-              </button>
-            )}
+        {user.role !== 'employee' ? (
+          <div className="flex-1 max-w-[140px] xs:max-w-[180px] sm:max-w-xs md:max-w-md mx-4 lg:mx-8">
+            <div className="relative flex items-center w-full bg-surface-container-high/40 hover:bg-surface-container-high/70 focus-within:bg-surface-container-high/90 focus-within:ring-2 focus-within:ring-primary/20 border border-outline-variant/30 rounded-full px-3 py-1.5 transition-all duration-200">
+              <span className="material-symbols-outlined text-on-surface-variant text-[18px] mr-2 select-none">search</span>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  if (user.role !== 'employee' && tab !== 'requests') {
+                    navigateToTab('requests');
+                  }
+                }}
+                placeholder="Search bookings..."
+                className="bg-transparent border-none outline-none text-xs sm:text-sm text-on-surface placeholder-on-surface-variant/50 w-full focus:ring-0"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-outline-variant/30 text-on-surface-variant transition-colors"
+                  title="Clear search"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex-1" />
+        )}
 
         {/* Right side controls */}
         <div className="flex items-center gap-3">
