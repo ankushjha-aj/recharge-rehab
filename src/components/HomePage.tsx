@@ -1,6 +1,82 @@
 import React from 'react';
 import HeroBanner from './HeroBanner';
 
+interface PediatricService {
+  icon: string;
+  title: string;
+  desc: string;
+  overview: string;
+  helpsWith: string[];
+  whatToExpect: string;
+}
+
+const pediatricServices: PediatricService[] = [
+  {
+    icon: 'record_voice_over',
+    title: 'Speech Therapy',
+    desc: 'Unlocking communication through articulation, fluency, and language development support.',
+    overview:
+      'Our speech-language pathologists help children find their voice — building the articulation, fluency, and language skills they need to express themselves with confidence.',
+    helpsWith: [
+      'Articulation & pronunciation clarity',
+      'Stuttering and fluency disorders',
+      'Expressive & receptive language delays',
+      'Social communication and conversation skills',
+      'Feeding & swallowing (dysphagia) difficulties',
+    ],
+    whatToExpect:
+      'We begin with a detailed assessment, then build a personalized, play-based plan. Parents receive practical home strategies so progress continues between sessions.',
+  },
+  {
+    icon: 'psychology',
+    title: 'Behavioural Therapy',
+    desc: 'Structured strategies for behavioural and communication challenges, focus, and self-regulation.',
+    overview:
+      'Using evidence-based approaches like Applied Behaviour Analysis (ABA), we help children develop focus, self-regulation, and positive behaviours that support learning and daily life.',
+    helpsWith: [
+      'Autism Spectrum Disorder (ASD) support',
+      'ADHD & attention challenges',
+      'Emotional regulation and reducing meltdowns',
+      'Building daily-living and social skills',
+      'Replacing challenging behaviours with positive ones',
+    ],
+    whatToExpect:
+      'Therapists observe and measure behaviour, set clear goals, and use structured reinforcement. Progress is tracked with data and reviewed with families regularly.',
+  },
+  {
+    icon: 'school',
+    title: 'Special Education',
+    desc: 'Personalized learning strategies to help every child reach their academic potential.',
+    overview:
+      'Every child learns differently. Our special educators design individualized learning plans that meet children where they are and move them toward their academic potential.',
+    helpsWith: [
+      'Learning disabilities (dyslexia, dysgraphia, dyscalculia)',
+      'Developmental and cognitive delays',
+      'Pre-academic and school-readiness skills',
+      'Attention, memory, and processing support',
+      'Individualized Education Plans (IEPs)',
+    ],
+    whatToExpect:
+      'We assess each child’s strengths and needs, then deliver one-on-one, goal-driven teaching. Milestones are tracked and shared so families see measurable growth.',
+  },
+  {
+    icon: 'diversity_1',
+    title: 'Parent Counseling',
+    desc: 'Empowering caregivers with emotional support and practical guidance for home.',
+    overview:
+      'Caregivers are a child’s most important therapists. We equip parents with the knowledge, tools, and emotional support to confidently carry therapy into everyday life.',
+    helpsWith: [
+      'Understanding your child’s diagnosis and needs',
+      'Practical strategies for home routines',
+      'Managing stress and caregiver burnout',
+      'Consistent techniques across therapy and home',
+      'Navigating school and community resources',
+    ],
+    whatToExpect:
+      'Through guided sessions, parents learn hands-on techniques and receive ongoing emotional support — building a strong, consistent team around the child.',
+  },
+];
+
 const developmentalConditions = [
   'Autism Spectrum Disorder (ASD)',
   'ADHD & Attention Challenges',
@@ -77,9 +153,26 @@ interface HomePageProps {
 }
 
 const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
+  const [activeService, setActiveService] = React.useState<PediatricService | null>(null);
+
   React.useEffect(() => {
     document.title = "Recharge Rehabilitation";
   }, []);
+
+  // Close the details modal on Escape and lock body scroll while it's open.
+  React.useEffect(() => {
+    if (!activeService) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveService(null);
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [activeService]);
 
   return (
     <div className="flex-grow">
@@ -97,65 +190,26 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
-            {/* Card 1 */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-[20px]">record_voice_over</span>
+            {pediatricServices.map((service) => (
+              <div
+                key={service.title}
+                className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
+                  <span className="material-symbols-outlined text-primary text-[20px]">{service.icon}</span>
+                </div>
+                <h3 className="text-headline-sm text-on-surface font-bold">{service.title}</h3>
+                <p className="text-body-md text-on-surface-variant leading-relaxed">{service.desc}</p>
+                <button
+                  type="button"
+                  onClick={() => setActiveService(service)}
+                  className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1 self-start"
+                >
+                  Learn More
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
               </div>
-              <h3 className="text-headline-sm text-on-surface font-bold">Speech Therapy</h3>
-              <p className="text-body-md text-on-surface-variant leading-relaxed">
-                Unlocking communication through articulation, fluency, and language development support.
-              </p>
-              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
-                Learn More
-                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-              </a>
-            </div>
-
-            {/* Card 2 */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-[20px]">psychology</span>
-              </div>
-              <h3 className="text-headline-sm text-on-surface font-bold">Behavioural Therapy</h3>
-              <p className="text-body-md text-on-surface-variant leading-relaxed">
-                Structured strategies for behavioural and communication challenges, focus, and self-regulation.
-              </p>
-              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
-                Learn More
-                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-              </a>
-            </div>
-
-            {/* Card 3 */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-[20px]">school</span>
-              </div>
-              <h3 className="text-headline-sm text-on-surface font-bold">Special Education</h3>
-              <p className="text-body-md text-on-surface-variant leading-relaxed">
-                Personalized learning strategies to help every child reach their academic potential.
-              </p>
-              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
-                Learn More
-                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-              </a>
-            </div>
-
-            {/* Card 4 */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="w-10 h-10 rounded-full bg-primary-fixed grid place-items-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-[20px]">diversity_1</span>
-              </div>
-              <h3 className="text-headline-sm text-on-surface font-bold">Parent Counseling</h3>
-              <p className="text-body-md text-on-surface-variant leading-relaxed">
-                Empowering caregivers with emotional support and practical guidance for home.
-              </p>
-              <a href="/about" className="text-primary font-bold text-sm hover:underline mt-auto pt-4 flex items-center gap-1">
-                Learn More
-                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-              </a>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -410,6 +464,70 @@ const HomePage: React.FC<HomePageProps> = ({ onBookConsultation }) => {
           </div>
         </div>
       </section>
+
+      {/* PEDIATRIC SERVICE DETAILS MODAL */}
+      {activeService && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="service-modal-title"
+        >
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in"
+            onClick={() => setActiveService(null)}
+          />
+          <div className="relative w-full max-w-lg max-h-[88vh] overflow-y-auto bg-surface-container-lowest border border-outline-variant rounded-[1.75rem] shadow-2xl animate-scale-bounce-in">
+            <button
+              type="button"
+              onClick={() => setActiveService(null)}
+              aria-label="Close"
+              className="absolute top-4 right-4 w-9 h-9 rounded-full grid place-items-center text-on-surface-variant hover:bg-primary-fixed hover:text-primary transition-colors"
+            >
+              <span className="material-symbols-outlined text-[22px]">close</span>
+            </button>
+
+            <div className="p-7 sm:p-8">
+              <div className="w-12 h-12 rounded-full bg-primary-fixed grid place-items-center shrink-0 mb-4">
+                <span className="material-symbols-outlined text-primary text-[24px]">{activeService.icon}</span>
+              </div>
+              <h3 id="service-modal-title" className="text-headline-md font-extrabold text-on-surface mb-3">
+                {activeService.title}
+              </h3>
+              <p className="text-body-md text-on-surface-variant leading-relaxed mb-6">
+                {activeService.overview}
+              </p>
+
+              <h4 className="text-body-md font-bold text-on-surface mb-3">How we help</h4>
+              <ul className="mb-6 space-y-1">
+                {activeService.helpsWith.map((item) => (
+                  <li key={item} className="flex items-start gap-2 py-1 text-body-md text-on-surface-variant">
+                    <span className="material-symbols-outlined text-primary text-[18px] mt-0.5">check_circle</span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+
+              <h4 className="text-body-md font-bold text-on-surface mb-2">What to expect</h4>
+              <p className="text-body-md text-on-surface-variant leading-relaxed mb-7">
+                {activeService.whatToExpect}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveService(null);
+                  onBookConsultation?.();
+                }}
+                className="w-full bg-primary text-on-primary font-bold text-sm rounded-full py-3.5 flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-[18px]">calendar_month</span>
+                Book a Consultation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
