@@ -16,10 +16,15 @@ import 'dotenv/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
+import fs from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import sharp from 'sharp';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { Pool } = pg;
@@ -316,6 +321,17 @@ async function createBooking(b) {
      b.concern || '', b.notes || '', b.status || 'requested', b.payment || 'pending',
      b.requestedAt || new Date().toISOString(), b.updatedAt || new Date().toISOString()],
   );
+  // WhatsApp the chosen therapist that a booking just landed on their day.
+  notifyBookingAssigned(null, {
+    specialist_id: b.specialistId || 'any',
+    status: b.status || 'requested',
+    date: b.date || '',
+    slot: b.slot || '',
+    parent_name: b.parentName || '',
+    child_age: b.childAge || '',
+    session_type: b.sessionType || '',
+    mode: b.mode || 'clinic',
+  }).catch((e) => console.error('WA booking notify error:', String(e.message || e)));
   return b;
 }
 
@@ -332,6 +348,8 @@ async function listBookings() {
 }
 
 async function updateBooking({ id, patch = {} }) {
+  const { rows: beforeRows } = await pool.query('SELECT * FROM bookings WHERE id = $1', [id]);
+  const before = beforeRows[0] || null;
   const sets = [], vals = [];
   let i = 1;
   for (const [k, col] of Object.entries(BOOKING_PATCH)) {
@@ -341,6 +359,8 @@ async function updateBooking({ id, patch = {} }) {
   vals.push(id);
   const { rows } = await pool.query(`UPDATE bookings SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
   if (!rows[0]) throw httpErr(404, 'Booking not found');
+  // WhatsApp the therapist on assignment/confirmation/reschedule (async, non-blocking).
+  notifyBookingAssigned(before, rows[0]).catch((e) => console.error('WA booking notify error:', String(e.message || e)));
   return toBooking(rows[0]);
 }
 
@@ -468,7 +488,7 @@ async function applyCsvAvailability(date, entries, replaceAll = false) {
   } finally {
     client.release();
   }
-  return { date, blockedSlots: rows.length, matched, unmatched };
+  return { date, blockedSlots: rows.length, matched, unmatched, slots: rows };
 }
 
 async function clearCsvAvailability(date) {
@@ -723,11 +743,32 @@ async function listSheetTabs(id) {
   return tabs.length ? tabs : null;
 }
 
-// Resolve which tab to sync: today's weekday tab when the tab list is readable
-// (names matched on the first three letters — the sheet uses THUR, "WED " etc).
-// Falls back to the gid in the pasted link if the tab list can't be read.
-async function resolveDayTab(ref) {
-  const prefix = WEEKDAY_PREFIXES[new Date().getDay()]; // server runs in clinic-local time
+// Server-local yyyy-mm-dd, offset by whole days (plain toISOString() is UTC and
+// would flip the day back during the early IST morning).
+function localDateStr(offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+// Local clinic wall-clock 'HH:mm'.
+const localHHMM = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(11, 16);
+
+// A day's schedule locks at 17:45 clinic time (the last slot starts 17:00):
+// from then on the sessions are that day's official record — payroll counts
+// total sessions / working days / absences from them — so neither the sheet
+// sync nor an admin "clear" may change them anymore.
+const DAY_LOCK_TIME = '17:45';
+function isDayLocked(dateIso) {
+  const today = localDateStr(0);
+  return dateIso < today || (dateIso === today && localHHMM() >= DAY_LOCK_TIME);
+}
+
+// Resolve which tab to sync: the weekday tab for today (+offset) when the tab
+// list is readable (names matched on the first three letters — the sheet uses
+// THUR, "WED " etc). Falls back to the gid in the pasted link if the tab list
+// can't be read.
+async function resolveDayTab(ref, offsetDays = 0) {
+  const prefix = WEEKDAY_PREFIXES[new Date(Date.now() + offsetDays * 86400000).getDay()]; // clinic-local time
   const tabs = await listSheetTabs(ref.id).catch(() => null);
   if (!tabs) return { gid: ref.gid, tab: null, prefix };
   const match = tabs.find((t) => t.name.toUpperCase().startsWith(prefix));
@@ -735,10 +776,10 @@ async function resolveDayTab(ref) {
   return { gid: match.gid, tab: match.name, prefix };
 }
 
-async function fetchSheetCsv(url) {
+async function fetchSheetCsv(url, offsetDays = 0) {
   const ref = parseSheetUrl(url);
   if (!ref) throw httpErr(400, 'That does not look like a Google Sheets link.');
-  const day = await resolveDayTab(ref);
+  const day = await resolveDayTab(ref, offsetDays);
   if (day.none) return { none: true, prefix: day.prefix };
   const exportUrl = `https://docs.google.com/spreadsheets/d/${ref.id}/export?format=csv&gid=${day.gid}`;
   const res = await fetch(exportUrl, { redirect: 'follow' });
@@ -755,8 +796,8 @@ async function fetchSheetCsv(url) {
 // Last sync outcome, shown in the admin panel. Kept in memory (resets on boot).
 const sheetSync = {
   running: false,
-  last: null, // { at, ok, error?, date?, blockedSlots?, matched?, unmatched?, changed }
-  lastHash: '',
+  last: null, // { at, ok, error?, note?, date?, tab?, blockedSlots?, matched?, unmatched?, nextDay?, changed }
+  lastHash: { 0: '', 1: '' }, // per day-offset (today / tomorrow)
 };
 
 async function getSheetUrl() {
@@ -772,7 +813,7 @@ async function setAvailabilitySheet(url) {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [SHEET_URL_KEY, clean],
   );
-  sheetSync.lastHash = ''; // force a real sync on the next run
+  sheetSync.lastHash = { 0: '', 1: '' }; // force a real sync on the next run
   sheetSync.last = null;
   if (clean) return syncAvailabilitySheet(true);
   return { url: '', last: null };
@@ -784,75 +825,441 @@ async function getAvailabilitySheet() {
 
 // Fetch → (skip if unchanged) → parse → apply. `force` re-applies even when the
 // sheet text hasn't changed (the admin's "Sync now" button).
+// Sync one day's tab (offset 0 = today, 1 = tomorrow). Tomorrow's tab is
+// applied only once its header date says tomorrow — that's the receptionist
+// "publishing" the next day's schedule the evening before.
+async function syncDay(url, offsetDays, force) {
+  const fetched = await fetchSheetCsv(url, offsetDays);
+  if (fetched.none) return { closed: true, prefix: fetched.prefix };
+  const { text, tab } = fetched;
+  const hash = createHash('sha256').update(text).digest('hex');
+  if (!force && hash === sheetSync.lastHash[offsetDays]) return { unchanged: true };
+  const rows = parseCsvRows(text);
+  const targetDate = localDateStr(offsetDays);
+  const sheetDate = extractSheetDate(rows);
+  // A header date before the target day means the tab still holds an older
+  // schedule — show nothing rather than stale data, keep checking. For
+  // tomorrow's tab a missing date also counts as "not published yet".
+  if ((sheetDate && sheetDate < targetDate) || (!sheetDate && offsetDays > 0)) {
+    sheetSync.lastHash[offsetDays] = hash; // cache: same stale text needn't re-parse every poll
+    return { stale: true, tab, sheetDate, targetDate };
+  }
+  // No parseable header date (today only): apply to today rather than dying on
+  // a formatting slip in the date cell.
+  const date = sheetDate || targetDate;
+  const { entries, badTimes } = parseAvailabilityRows(rows);
+  const result = await applyCsvAvailability(date, entries, true);
+  sheetSync.lastHash[offsetDays] = hash;
+  return { applied: true, date, tab, sheetDate, badTimes, result };
+}
+
 async function syncAvailabilitySheet(force = false) {
   const url = await getSheetUrl();
   if (!url) throw httpErr(400, 'No Google Sheet link is configured yet.');
   if (sheetSync.running) return { url, last: sheetSync.last, skipped: 'busy' };
   sheetSync.running = true;
   try {
-    const fetched = await fetchSheetCsv(url);
-    if (fetched.none) {
-      // No tab for today's weekday (Sunday) — clinic closed, nothing to sync.
-      sheetSync.last = {
-        at: new Date().toISOString(),
-        ok: true,
-        note: `No "${fetched.prefix}" tab in the spreadsheet — clinic closed today, nothing synced.`,
-        changed: false,
-      };
-      return { url, last: sheetSync.last, changed: false };
+    const today = await syncDay(url, 0, force);
+    // Tomorrow's tab is best-effort: its failure must never break today's sync.
+    let next = null;
+    try {
+      next = await syncDay(url, 1, force);
+    } catch (e) {
+      console.error('Next-day sheet sync error:', String(e.message || e));
     }
-    const { text, tab } = fetched;
-    const hash = createHash('sha256').update(text).digest('hex');
-    if (!force && hash === sheetSync.lastHash) {
-      return { url, last: sheetSync.last, changed: false };
+
+    const changed = Boolean(today.applied || (next && next.applied));
+    if (!(today.unchanged && (!next || next.unchanged || next.closed))) {
+      const status = { at: new Date().toISOString(), ok: true, changed };
+      if (today.applied) {
+        Object.assign(status, {
+          date: today.date,
+          tab: today.tab,
+          sheetDate: today.sheetDate,
+          dateAdjusted: !today.sheetDate,
+          blockedSlots: today.result.blockedSlots,
+          matched: today.result.matched,
+          unmatched: today.result.unmatched,
+          badTimes: today.badTimes,
+        });
+      } else if (today.closed) {
+        status.note = `No "${today.prefix}" tab in the spreadsheet — clinic closed today, nothing synced.`;
+      } else if (today.stale) {
+        status.note = `The ${today.tab ? `"${today.tab}" ` : ''}tab's header still shows ${today.sheetDate} — waiting for today's schedule (update the date cell in the sheet).`;
+        status.tab = today.tab;
+        status.sheetDate = today.sheetDate;
+      } else if (today.unchanged && sheetSync.last && sheetSync.last.ok) {
+        // Today untouched but tomorrow moved: carry today's info forward.
+        const { at: _at, nextDay: _nd, changed: _ch, ...prev } = sheetSync.last;
+        Object.assign(status, prev);
+      }
+      if (next && next.applied) {
+        status.nextDay = {
+          date: next.date,
+          tab: next.tab,
+          blockedSlots: next.result.blockedSlots,
+          unmatched: next.result.unmatched,
+        };
+      } else if (next && next.unchanged && sheetSync.last?.nextDay?.date === localDateStr(1)) {
+        status.nextDay = sheetSync.last.nextDay;
+      }
+      sheetSync.last = status;
     }
-    const rows = parseCsvRows(text);
-    // Server-local today (plain toISOString() is UTC and would flip the day
-    // back during the early IST morning).
-    const now = new Date();
-    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-    // A header date in the past means the tab still holds last week's schedule
-    // (the receptionist hasn't filled today in yet) — show nothing rather than
-    // stale data, and keep checking until the date cell is updated.
-    const sheetDate = extractSheetDate(rows);
-    if (sheetDate && sheetDate < today) {
-      sheetSync.lastHash = hash; // cache: no point re-parsing the same stale text every minute
-      sheetSync.last = {
-        at: new Date().toISOString(),
-        ok: true,
-        note: `The ${tab ? `"${tab}" ` : ''}tab's header still shows ${sheetDate} — waiting for today's schedule (update the date cell in the sheet).`,
-        tab,
-        sheetDate,
-        changed: false,
-      };
-      return { url, last: sheetSync.last, changed: false };
+
+    // WhatsApp: tell each therapist about their (new/changed) day. Never let
+    // notification errors break the sync. Tomorrow's messages are held until
+    // 8 PM (WA_EVENING_TIME) — the evening tick sends the first batch; after
+    // that any sheet edit notifies just the affected therapists here.
+    if (today.applied) await notifyScheduleChanges(today.date, today.result).catch((e) => console.error('WA notify error:', String(e.message || e)));
+    if (next && next.applied && localHHMM() >= WA_EVENING_TIME) {
+      await notifyScheduleChanges(next.date, next.result).catch((e) => console.error('WA notify error:', String(e.message || e)));
     }
-    // No parseable header date: apply to today rather than dying on a
-    // formatting slip in the date cell.
-    const date = sheetDate || today;
-    const { entries, badTimes } = parseAvailabilityRows(rows);
-    const result = await applyCsvAvailability(date, entries, true);
-    sheetSync.lastHash = hash;
-    sheetSync.last = {
-      at: new Date().toISOString(),
-      ok: true,
-      date,
-      tab,
-      sheetDate,
-      dateAdjusted: !sheetDate, // no header date found — fell back to today
-      blockedSlots: result.blockedSlots,
-      matched: result.matched,
-      unmatched: result.unmatched,
-      badTimes,
-      changed: true,
-    };
-    return { url, last: sheetSync.last, changed: true };
+
+    return { url, last: sheetSync.last, changed };
   } catch (e) {
     sheetSync.last = { at: new Date().toISOString(), ok: false, error: String(e.message || e) };
     throw e;
   } finally {
     sheetSync.running = false;
   }
+}
+
+// ---- WhatsApp notifications --------------------------------------------------
+/*
+ * Sends each therapist their day's schedule on WhatsApp: an overview image plus
+ * a login link. Fires when a day's schedule first syncs from the sheet (incl.
+ * tomorrow's, published the evening before), whenever that therapist's slots
+ * change, and once every morning as a reminder. Uses Baileys (WhatsApp Web
+ * bridge): the admin pairs the clinic's WhatsApp once by scanning a QR code
+ * from the admin panel; credentials persist in server/wa-auth/.
+ */
+const SITE_URL = process.env.SITE_URL || 'http://65.109.15.215:3000';
+const WA_AUTH_DIR = path.join(__dirname, 'wa-auth');
+const WA_MORNING_TIME = '08:30'; // today's final schedule (clinic-local)
+const WA_EVENING_TIME = '20:00'; // tomorrow's schedule goes out at 8 PM
+
+const wa = {
+  sock: null,
+  status: 'starting', // starting | pairing | connected | disconnected | logged_out
+  qrDataUrl: null,
+  me: null,
+  lastError: null,
+  sentCount: 0,
+};
+
+async function startWhatsApp() {
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(WA_AUTH_DIR);
+    const sock = makeWASocket({
+      auth: state,
+      logger: pino({ level: 'silent' }),
+      browser: ['Recharge Rehab', 'Chrome', '1.0'],
+      syncFullHistory: false,
+    });
+    wa.sock = sock;
+    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('connection.update', async (u) => {
+      const { connection, lastDisconnect, qr } = u;
+      if (qr) {
+        wa.status = 'pairing';
+        wa.qrDataUrl = await QRCode.toDataURL(qr).catch(() => null);
+      }
+      if (connection === 'open') {
+        wa.status = 'connected';
+        wa.qrDataUrl = null;
+        wa.lastError = null;
+        wa.me = sock.user?.id?.split(':')[0] || null;
+        console.log('WhatsApp connected as', wa.me);
+      }
+      if (connection === 'close') {
+        wa.sock = null;
+        const code = lastDisconnect?.error?.output?.statusCode;
+        wa.lastError = String(lastDisconnect?.error?.message || 'connection closed');
+        if (code === DisconnectReason.loggedOut) {
+          // The phone unlinked this device — wipe creds so a fresh QR appears.
+          wa.status = 'logged_out';
+          fs.rmSync(WA_AUTH_DIR, { recursive: true, force: true });
+          setTimeout(startWhatsApp, 3000);
+        } else {
+          wa.status = 'disconnected';
+          setTimeout(startWhatsApp, 5000);
+        }
+      }
+    });
+  } catch (e) {
+    wa.lastError = String(e.message || e);
+    wa.status = 'disconnected';
+    setTimeout(startWhatsApp, 15000);
+  }
+}
+
+// '98765 43210' / '+91 98765-43210' → '919876543210@s.whatsapp.net'
+function waJid(phone) {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) digits = `91${digits}`;
+  return `${digits}@s.whatsapp.net`;
+}
+
+// Single send choke point. To move to the official Meta Cloud API later, only
+// this function changes (POST to graph.facebook.com with a template) — every
+// notification above it stays identical.
+async function waSendMessage(jid, payload) {
+  if (!wa.sock || wa.status !== 'connected') throw new Error('WhatsApp is not connected.');
+  await wa.sock.sendMessage(jid, payload);
+  wa.sentCount += 1;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---- schedule overview image (SVG → PNG via sharp) --------------------------
+const fmtSlot12 = (t) => {
+  const [h, m] = t.split(':').map(Number);
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+};
+const prettyDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', {
+  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+});
+const escXml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+async function scheduleImage(name, dateIso, sessions) {
+  const W = 720;
+  const rowH = 52;
+  const headerH = 170;
+  const footerH = 60;
+  const list = sessions.length ? sessions : [{ time: '', reason: 'No sessions scheduled — enjoy the free day!' }];
+  const H = headerH + list.length * rowH + footerH;
+
+  const rowsSvg = list.map((s, i) => {
+    const y = headerH + i * rowH;
+    const zebra = i % 2 === 0 ? '#F4F8FE' : '#FFFFFF';
+    return `
+      <rect x="24" y="${y}" width="${W - 48}" height="${rowH}" fill="${zebra}" rx="8"/>
+      ${s.time ? `<text x="48" y="${y + 33}" font-family="DejaVu Sans" font-size="19" font-weight="bold" fill="#0B4A8F">${fmtSlot12(s.time)}</text>` : ''}
+      <text x="${s.time ? 190 : 48}" y="${y + 33}" font-family="DejaVu Sans" font-size="19" fill="#1F2937">${escXml(s.reason)}</text>`;
+  }).join('');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <rect width="${W}" height="${H}" fill="#FFFFFF"/>
+    <rect width="${W}" height="120" fill="#0B4A8F"/>
+    <text x="36" y="52" font-family="DejaVu Sans" font-size="26" font-weight="bold" fill="#FFFFFF">RECHARGE REHABILITATION</text>
+    <text x="36" y="88" font-family="DejaVu Sans" font-size="19" fill="#CFE3FB">Daily Session Schedule</text>
+    <text x="36" y="152" font-family="DejaVu Sans" font-size="21" font-weight="bold" fill="#111827">${escXml(name)}</text>
+    <text x="${W - 36}" y="152" text-anchor="end" font-family="DejaVu Sans" font-size="18" fill="#4B5563">${prettyDate(dateIso)}</text>
+    ${rowsSvg}
+    <text x="36" y="${H - 24}" font-family="DejaVu Sans" font-size="14" fill="#6B7280">${sessions.length} session${sessions.length === 1 ? '' : 's'} · synced from the clinic schedule</text>
+  </svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+// ---- notification engine -----------------------------------------------------
+// One row per (date, therapist): the hash of their last-notified schedule, so a
+// re-sync that doesn't change their day sends nothing, while any slot change
+// (including "all sessions removed") notifies just the affected therapists.
+async function ensureWaTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS wa_notifications (
+      date     TEXT NOT NULL,
+      staff_id TEXT NOT NULL,
+      hash     TEXT NOT NULL,
+      sent_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (date, staff_id)
+    )`);
+}
+
+async function sendScheduleMessage(user, dateIso, sessions, isUpdate) {
+  const jid = waJid(user.phone);
+  if (!jid || !wa.sock || wa.status !== 'connected') return false;
+  const png = await scheduleImage(user.name, dateIso, sessions);
+  const caption =
+    `${isUpdate ? '🔄 *Schedule update*' : '📅 *Your schedule*'} — ${prettyDate(dateIso)}\n\n` +
+    `Hi ${user.name}, you have *${sessions.length} session${sessions.length === 1 ? '' : 's'}*${isUpdate ? ' (changed since the last message)' : ''}.\n\n` +
+    `Full details on your dashboard:\n${SITE_URL}\n(login with your employee ID)`;
+  await waSendMessage(jid, { image: png, caption });
+  return true;
+}
+
+// After a day's sheet apply: diff each therapist's slots against what they were
+// last told, and message only the changed ones.
+async function notifyScheduleChanges(dateIso, applyResult) {
+  if (wa.status !== 'connected') return; // not paired yet — sync still works, sends catch up later
+  const byStaff = new Map();
+  for (const s of applyResult.slots || []) {
+    if (!byStaff.has(s.staffId)) byStaff.set(s.staffId, []);
+    byStaff.get(s.staffId).push({ time: s.time, reason: s.reason });
+  }
+  for (const list of byStaff.values()) list.sort((a, b) => a.time.localeCompare(b.time));
+
+  const { rows: emps } = await pool.query(`SELECT id, name, phone FROM users WHERE role = 'employee' AND active = TRUE`);
+  const { rows: sentRows } = await pool.query('SELECT staff_id, hash FROM wa_notifications WHERE date = $1', [dateIso]);
+  const sentByStaff = new Map(sentRows.map((r) => [r.staff_id, r.hash]));
+
+  for (const emp of emps) {
+    const sessions = byStaff.get(emp.id) || [];
+    const prevHash = sentByStaff.get(emp.id);
+    if (sessions.length === 0 && prevHash === undefined) continue; // nothing before, nothing now
+    const hash = createHash('sha256').update(JSON.stringify(sessions)).digest('hex');
+    if (hash === prevHash) continue; // their day didn't change
+    if (!waJid(emp.phone)) continue; // no number on file — skipped (shown in admin card)
+    try {
+      const ok = await sendScheduleMessage(emp, dateIso, sessions, prevHash !== undefined);
+      if (ok) {
+        await pool.query(
+          `INSERT INTO wa_notifications (date, staff_id, hash) VALUES ($1,$2,$3)
+           ON CONFLICT (date, staff_id) DO UPDATE SET hash = EXCLUDED.hash, sent_at = now()`,
+          [dateIso, emp.id, hash],
+        );
+        await sleep(1500); // human-ish pacing between sends
+      }
+    } catch (e) {
+      console.error(`WA send failed for ${emp.id}:`, String(e.message || e));
+    }
+  }
+}
+
+// Evening send: once per day from WA_EVENING_TIME, send everyone tomorrow's
+// schedule as synced so far. Diffs recorded in wa_notifications mean later
+// sheet edits notify only the affected therapists. If the sheet isn't
+// published by 8 PM, this keeps retrying each poll until it is.
+async function eveningNextDayTick() {
+  if (wa.status !== 'connected') return;
+  if (localHHMM() < WA_EVENING_TIME) return;
+  const tomorrow = localDateStr(1);
+  const { rows } = await pool.query('SELECT value FROM global_settings WHERE key = $1', ['wa_evening_sent']);
+  if (rows[0]?.value === tomorrow) return;
+  const { rows: blocks } = await pool.query(
+    `SELECT staff_id, time, reason FROM blocked_slots WHERE date = $1 AND source = 'csv' ORDER BY time`,
+    [tomorrow],
+  );
+  if (blocks.length === 0) return; // tomorrow not published yet — retry next poll
+  await pool.query(
+    `INSERT INTO global_settings (key, value) VALUES ('wa_evening_sent', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [tomorrow],
+  );
+  await notifyScheduleChanges(tomorrow, {
+    slots: blocks.map((b) => ({ staffId: b.staff_id, time: b.time, reason: b.reason })),
+  });
+  console.log(`WhatsApp evening schedules sent for ${tomorrow}`);
+}
+
+// Booking alerts: message the assigned therapist when an online booking lands
+// on them — created with them selected, newly confirmed, moved to them, or
+// rescheduled. Fire-and-forget from the booking handlers.
+async function notifyBookingAssigned(before, after) {
+  if (wa.status !== 'connected') return;
+  if (!after || !after.specialist_id || after.specialist_id === 'any') return;
+  if (after.status === 'cancelled') return;
+  const relevantChange =
+    !before ||
+    before.specialist_id !== after.specialist_id ||
+    before.status !== after.status ||
+    before.date !== after.date ||
+    before.slot !== after.slot;
+  if (!relevantChange) return;
+  const { rows } = await pool.query(
+    `SELECT id, name, phone FROM users WHERE id = $1 AND role = 'employee' AND active = TRUE`,
+    [after.specialist_id],
+  );
+  const emp = rows[0];
+  if (!emp) return;
+  const jid = waJid(emp.phone);
+  if (!jid) return;
+  const when = [after.date && prettyDate(after.date), after.slot && fmtSlot12(after.slot)].filter(Boolean).join(' · ');
+  const status = after.status === 'confirmed' ? '✅ Confirmed booking' : '🆕 New booking request';
+  const text =
+    `${status} — assigned to you\n\n` +
+    `👤 ${after.parent_name || 'Parent'}${after.child_age ? ` (child: ${after.child_age})` : ''}\n` +
+    `${after.session_type ? `🩺 ${after.session_type}\n` : ''}` +
+    `${when ? `🗓 ${when}\n` : ''}` +
+    `${after.mode === 'online' ? '💻 Online session\n' : ''}` +
+    `\nDetails on your dashboard:\n${SITE_URL}`;
+  try {
+    await waSendMessage(jid, { text });
+  } catch (e) {
+    console.error(`WA booking notify failed for ${emp.id}:`, String(e.message || e));
+  }
+}
+
+// Morning reminder: once per day after WA_MORNING_TIME, re-send everyone their
+// final day (even if already notified the evening before).
+async function morningReminderTick() {
+  if (wa.status !== 'connected') return;
+  const today = localDateStr(0);
+  const hhmm = localHHMM();
+  if (hhmm < WA_MORNING_TIME) return;
+  const { rows } = await pool.query('SELECT value FROM global_settings WHERE key = $1', ['wa_morning_sent']);
+  if (rows[0]?.value === today) return;
+  await pool.query(
+    `INSERT INTO global_settings (key, value) VALUES ('wa_morning_sent', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [today],
+  );
+  const { rows: blocks } = await pool.query(
+    `SELECT staff_id, time, reason FROM blocked_slots WHERE date = $1 AND source = 'csv' ORDER BY time`,
+    [today],
+  );
+  const byStaff = new Map();
+  for (const b of blocks) {
+    if (!byStaff.has(b.staff_id)) byStaff.set(b.staff_id, []);
+    byStaff.get(b.staff_id).push({ time: b.time, reason: b.reason });
+  }
+  if (byStaff.size === 0) return;
+  const { rows: emps } = await pool.query(`SELECT id, name, phone FROM users WHERE role = 'employee' AND active = TRUE`);
+  for (const emp of emps) {
+    const sessions = byStaff.get(emp.id);
+    if (!sessions || !waJid(emp.phone)) continue;
+    try {
+      await sendScheduleMessage(emp, today, sessions, false);
+      await sleep(1500);
+    } catch (e) {
+      console.error(`WA morning send failed for ${emp.id}:`, String(e.message || e));
+    }
+  }
+  console.log(`WhatsApp morning reminders sent for ${today}`);
+}
+
+async function getWhatsAppStatus() {
+  const { rows: emps } = await pool.query(
+    `SELECT name, phone FROM users WHERE role = 'employee' AND active = TRUE ORDER BY name`,
+  );
+  return {
+    status: wa.status,
+    qr: wa.qrDataUrl,
+    me: wa.me,
+    lastError: wa.lastError,
+    sentCount: wa.sentCount,
+    morningTime: WA_MORNING_TIME,
+    missingPhones: emps.filter((e) => !waJid(e.phone)).map((e) => e.name),
+  };
+}
+
+// Unlink and start a fresh pairing (new QR).
+async function resetWhatsApp() {
+  try { await wa.sock?.logout?.(); } catch { /* already gone */ }
+  try { wa.sock?.end?.(); } catch { /* noop */ }
+  wa.sock = null;
+  fs.rmSync(WA_AUTH_DIR, { recursive: true, force: true });
+  wa.status = 'starting';
+  wa.qrDataUrl = null;
+  wa.me = null;
+  setTimeout(startWhatsApp, 1000);
+  return { ok: true };
+}
+
+async function testWhatsApp(phone) {
+  if (wa.status !== 'connected') throw httpErr(400, 'WhatsApp is not connected yet.');
+  const jid = waJid(phone);
+  if (!jid) throw httpErr(400, 'Enter a valid phone number.');
+  const png = await scheduleImage('Test Message', localDateStr(0), [
+    { time: '10:00', reason: 'This is how schedules will look' },
+  ]);
+  await waSendMessage(jid, {
+    image: png,
+    caption: `✅ Test from Recharge Rehabilitation.\nDashboard: ${SITE_URL}`,
+  });
+  return { ok: true };
 }
 
 // Background poller: keeps the dashboards in step with the sheet without any
@@ -864,6 +1271,9 @@ function startSheetPoller() {
     } catch (e) {
       console.error('Sheet sync error:', String(e.message || e));
     }
+    // Scheduled WhatsApp batches (each guards its own time window + once-a-day flag).
+    await eveningNextDayTick().catch((e) => console.error('WA evening tick error:', String(e.message || e)));
+    await morningReminderTick().catch((e) => console.error('WA morning tick error:', String(e.message || e)));
   }, SHEET_POLL_MS);
 }
 
@@ -1392,6 +1802,9 @@ async function route(action, payload, token) {
     case 'getAvailabilitySheet': adminOnly(); return getAvailabilitySheet();
     case 'setAvailabilitySheet': adminOnly(); return setAvailabilitySheet(payload.url);
     case 'syncAvailabilitySheet': adminOnly(); return syncAvailabilitySheet(Boolean(payload && payload.force));
+    case 'getWhatsAppStatus': adminOnly(); return getWhatsAppStatus();
+    case 'resetWhatsApp': adminOnly(); return resetWhatsApp();
+    case 'testWhatsApp': adminOnly(); return testWhatsApp(payload && payload.phone);
 
     case 'listUsers': adminOnly(); return listUsers();
     case 'createUser': adminOnly(); return createUser(user, payload);
@@ -1452,8 +1865,10 @@ app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 
 ensureSchema()
   .then(ensureSeedUsers)
+  .then(ensureWaTable)
   .catch((e) => console.error('Boot/seed error:', e))
   .finally(() => {
     startSheetPoller();
+    startWhatsApp();
     app.listen(PORT, () => console.log(`Recharge server (site + API) listening on :${PORT}`));
   });

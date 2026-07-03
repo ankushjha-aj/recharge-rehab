@@ -653,6 +653,7 @@ export interface SheetSyncInfo {
   unmatched?: string[];
   badTimes?: string[];
   changed?: boolean;
+  nextDay?: { date: string; tab?: string | null; blockedSlots?: number; unmatched?: string[] };
 }
 export interface SheetConfig {
   url: string;
@@ -672,6 +673,33 @@ export async function setAvailabilitySheet(url: string): Promise<SheetConfig> {
 export async function syncAvailabilitySheet(force = true): Promise<SheetConfig> {
   requireRemote();
   return remote<SheetConfig>('syncAvailabilitySheet', { force });
+}
+
+// --- WhatsApp notifications ---------------------------------------------------
+// Server-side WhatsApp bridge: therapists get their schedule (image + login
+// link) at 8 PM for the next day, on any change to their day, at 8:30 AM as a
+// reminder, and when an online booking is assigned to them.
+export interface WhatsAppStatus {
+  status: 'starting' | 'pairing' | 'connected' | 'disconnected' | 'logged_out';
+  qr: string | null; // data-URL QR to scan while pairing
+  me: string | null; // connected phone number
+  lastError: string | null;
+  sentCount: number;
+  morningTime: string;
+  missingPhones: string[]; // active employees without a usable phone number
+}
+
+export async function getWhatsAppStatus(): Promise<WhatsAppStatus> {
+  requireRemote();
+  return remote<WhatsAppStatus>('getWhatsAppStatus', {});
+}
+export async function resetWhatsApp(): Promise<{ ok: boolean }> {
+  requireRemote();
+  return remote<{ ok: boolean }>('resetWhatsApp', {});
+}
+export async function testWhatsApp(phone: string): Promise<{ ok: boolean }> {
+  requireRemote();
+  return remote<{ ok: boolean }>('testWhatsApp', { phone });
 }
 
 // ===========================================================================

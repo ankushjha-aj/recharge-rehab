@@ -23,6 +23,10 @@ import {
   setAvailabilitySheet,
   syncAvailabilitySheet,
   type SheetConfig,
+  getWhatsAppStatus,
+  resetWhatsApp,
+  testWhatsApp,
+  type WhatsAppStatus,
   todayISO,
   dayAvailability,
   isStaffBusyAt,
@@ -2554,6 +2558,8 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
 
       <SheetSyncCard date={date} users={users} blocked={blocked} onChange={() => load(date)} />
 
+      <WhatsAppCard />
+
       {/* Manual clinic-wide blocks (closes a time for everyone). */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
         <h3 className="text-headline-sm font-bold text-on-surface mb-1">Clinic-wide blocks</h3>
@@ -2573,6 +2579,133 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+// WhatsApp notifications: pair the clinic's WhatsApp once (QR), then the server
+// messages each therapist their schedule — 8 PM for the next day, 8:30 AM
+// reminder, instant alerts on changes and on bookings assigned to them.
+const WhatsAppCard: React.FC = () => {
+  const [st, setSt] = useState<WhatsAppStatus | null>(null);
+  const [testPhone, setTestPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      setSt(await getWhatsAppStatus());
+    } catch {
+      /* backend offline — leave previous state */
+    }
+  }, []);
+  // Poll fast while pairing (QR rotates), slower once settled.
+  useEffect(() => {
+    refresh();
+    const fast = st?.status === 'pairing' || st?.status === 'starting';
+    const id = setInterval(refresh, fast ? 3_000 : 30_000);
+    return () => clearInterval(id);
+  }, [refresh, st?.status]);
+
+  const pill = (() => {
+    switch (st?.status) {
+      case 'connected': return { label: `Connected${st.me ? ` · +${st.me}` : ''}`, cls: 'bg-[#D1FADF] text-[#027A48]' };
+      case 'pairing': return { label: 'Scan QR to pair', cls: 'bg-[#FEF0C7] text-[#B54708]' };
+      case 'logged_out': return { label: 'Logged out — re-pair', cls: 'bg-[#FEE4E2] text-[#B42318]' };
+      case 'starting': return { label: 'Starting…', cls: 'bg-surface-container-high text-on-surface-variant' };
+      default: return { label: 'Disconnected', cls: 'bg-[#FEE4E2] text-[#B42318]' };
+    }
+  })();
+
+  const doTest = async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      await testWhatsApp(testPhone);
+      setMsg('✓ Test message sent — check that phone.');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doReset = async () => {
+    if (!confirm('Unlink the current WhatsApp and show a fresh QR code?')) return;
+    setBusy(true);
+    setMsg('');
+    try {
+      await resetWhatsApp();
+      setTimeout(refresh, 1500);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
+      <h3 className="text-headline-sm font-bold text-on-surface mb-1 flex items-center gap-2">
+        WhatsApp schedule alerts
+        <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${pill.cls}`}>{pill.label}</span>
+      </h3>
+      <p className="text-body-sm text-on-surface-variant mb-4 max-w-2xl">
+        Each therapist &amp; special educator gets their schedule on WhatsApp: <strong>8:00 PM</strong> tomorrow's
+        sessions, <strong>{st?.morningTime ?? '8:30'} AM</strong> today's final schedule, plus instant alerts when
+        their day changes or an online booking is assigned to them. Every message carries a schedule image and the
+        dashboard login link.
+      </p>
+
+      {st?.status === 'pairing' && st.qr && (
+        <div className="flex flex-wrap items-center gap-5 mb-4 bg-surface-container-high/30 border border-outline-variant/60 rounded-xl p-4">
+          <img src={st.qr} alt="WhatsApp pairing QR" className="w-44 h-44 rounded-lg bg-white p-2" />
+          <div className="text-body-sm text-on-surface-variant max-w-sm space-y-1">
+            <p className="font-bold text-on-surface">Pair the clinic's WhatsApp:</p>
+            <p>1. Open WhatsApp on the clinic phone</p>
+            <p>2. <strong>Settings → Linked devices → Link a device</strong></p>
+            <p>3. Scan this code (it refreshes automatically)</p>
+          </div>
+        </div>
+      )}
+
+      {(st?.missingPhones?.length ?? 0) > 0 && (
+        <p className="text-body-sm text-[#B54708] mb-3">
+          <span className="font-bold">No phone number on file</span> (they won't receive messages until added in
+          Employees): {st!.missingPhones.join(', ')}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          type="tel"
+          value={testPhone}
+          onChange={(e) => setTestPhone(e.target.value)}
+          placeholder="Test number e.g. 98765 43210"
+          disabled={busy || st?.status !== 'connected'}
+          className={`${inputCls} w-56`}
+        />
+        <button
+          onClick={doTest}
+          disabled={busy || !testPhone.trim() || st?.status !== 'connected'}
+          className="bg-primary text-on-primary px-4 py-2 rounded-full font-bold text-sm transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+        >
+          Send test
+        </button>
+        <button
+          onClick={doReset}
+          disabled={busy}
+          className="flex items-center gap-1.5 border border-[#FDA29B] text-[#B42318] hover:bg-[#FEE4E2] px-4 py-2 rounded-full font-bold text-sm transition-colors disabled:opacity-50"
+        >
+          {st?.status === 'connected' ? 'Unlink / re-pair' : 'Restart pairing'}
+        </button>
+      </div>
+
+      {msg && <p className="mt-3 text-body-sm font-bold text-on-surface-variant">{msg}</p>}
+      {st?.lastError && st.status !== 'connected' && (
+        <p className="mt-2 text-body-sm text-[#B42318]">Last error: {st.lastError}</p>
+      )}
+      {st?.status === 'connected' && (
+        <p className="mt-3 text-[11px] text-on-surface-variant opacity-70">{st.sentCount} message{st.sentCount === 1 ? '' : 's'} sent since the server started.</p>
+      )}
     </div>
   );
 };
@@ -2722,6 +2855,14 @@ const SheetSyncCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
                 <p className="text-[#B42318]">
                   <span className="font-bold">Not matched to any employee:</span> {(last.unmatched ?? []).join(', ')}
                   {' '}— add them in Employees or fix the name in the sheet.
+                </p>
+              )}
+              {last.nextDay && (
+                <p>
+                  <span className="font-bold text-on-surface">Tomorrow ready:</span>{' '}
+                  {last.nextDay.blockedSlots ?? 0} slots for {prettyAdminDate(last.nextDay.date)}
+                  {last.nextDay.tab && <> from tab <span className="font-bold text-on-surface">{last.nextDay.tab}</span></>}
+                  {' '}— WhatsApp schedules go out at 8 PM.
                 </p>
               )}
             </>
