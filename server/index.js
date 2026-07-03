@@ -429,6 +429,9 @@ async function dayAvailability(date) {
 // a therapist whose bookings were all removed must have their blocks freed too).
 async function applyCsvAvailability(date, entries, replaceAll = false) {
   if (!date) throw httpErr(400, 'A date is required.');
+  if (isDayLocked(date)) {
+    throw httpErr(423, `That day's sessions are locked (after ${DAY_LOCK_TIME}) — they are the official record for payroll and cannot be changed.`);
+  }
   const list = Array.isArray(entries) ? entries : [];
   const { rows: emps } = await pool.query(
     `SELECT id, name FROM users WHERE role = 'employee'`,
@@ -493,6 +496,9 @@ async function applyCsvAvailability(date, entries, replaceAll = false) {
 
 async function clearCsvAvailability(date) {
   if (!date) throw httpErr(400, 'A date is required.');
+  if (isDayLocked(date)) {
+    throw httpErr(423, `That day's sessions are locked (after ${DAY_LOCK_TIME}) — they are the official record for payroll and cannot be cleared.`);
+  }
   const { rowCount } = await pool.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
   return { date, removed: rowCount };
 }
@@ -820,7 +826,13 @@ async function setAvailabilitySheet(url) {
 }
 
 async function getAvailabilitySheet() {
-  return { url: await getSheetUrl(), last: sheetSync.last, pollSeconds: SHEET_POLL_MS / 1000 };
+  return {
+    url: await getSheetUrl(),
+    last: sheetSync.last,
+    pollSeconds: SHEET_POLL_MS / 1000,
+    dayLockTime: DAY_LOCK_TIME,
+    todayLocked: isDayLocked(localDateStr(0)),
+  };
 }
 
 // Fetch → (skip if unchanged) → parse → apply. `force` re-applies even when the
@@ -847,6 +859,12 @@ async function syncDay(url, offsetDays, force) {
   // No parseable header date (today only): apply to today rather than dying on
   // a formatting slip in the date cell.
   const date = sheetDate || targetDate;
+  // After the daily lock the sheet may keep changing, but today's record is
+  // final — stop applying (tomorrow's tab keeps syncing normally).
+  if (isDayLocked(date)) {
+    sheetSync.lastHash[offsetDays] = hash;
+    return { lockedDay: true, tab, date };
+  }
   const { entries, badTimes } = parseAvailabilityRows(rows);
   const result = await applyCsvAvailability(date, entries, true);
   sheetSync.lastHash[offsetDays] = hash;
@@ -884,6 +902,9 @@ async function syncAvailabilitySheet(force = false) {
         });
       } else if (today.closed) {
         status.note = `No "${today.prefix}" tab in the spreadsheet — clinic closed today, nothing synced.`;
+      } else if (today.lockedDay) {
+        status.note = `Today's sessions locked at ${DAY_LOCK_TIME} — they are now the official record for payroll; sheet changes no longer apply to today.`;
+        status.tab = today.tab;
       } else if (today.stale) {
         status.note = `The ${today.tab ? `"${today.tab}" ` : ''}tab's header still shows ${today.sheetDate} — waiting for today's schedule (update the date cell in the sheet).`;
         status.tab = today.tab;

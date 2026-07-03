@@ -18,7 +18,6 @@ import {
   listBlocked,
   addBlocked,
   removeBlocked,
-  clearCsvAvailability,
   getAvailabilitySheet,
   setAvailabilitySheet,
   syncAvailabilitySheet,
@@ -2540,17 +2539,53 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
   }, [date, load]);
 
   const blockedTimes = new Set(blocked.filter((b) => b.staffId === 'any').map((b) => b.time));
+  const isPast = date < today;
   const toggle = async (time: string) => {
+    if (isPast) return; // past days are the locked record — view only
     if (blockedTimes.has(time)) await removeBlocked(`${date}|${time}|any`);
     else await addBlocked(date, time, 'any', 'Blocked by admin');
     load(date);
   };
   const isSunday = new Date(date + 'T00:00:00').getDay() === 0;
+  const stepDay = (days: number) => {
+    const d = new Date(date + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    setDate(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10));
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Date"><input type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
+        <Field label="Date">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => stepDay(-1)}
+              title="Previous day"
+              className="w-9 h-9 rounded-xl border border-outline-variant grid place-items-center text-on-surface-variant hover:text-primary hover:border-primary transition-colors active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+            </button>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+            <button
+              type="button"
+              onClick={() => stepDay(1)}
+              title="Next day"
+              className="w-9 h-9 rounded-xl border border-outline-variant grid place-items-center text-on-surface-variant hover:text-primary hover:border-primary transition-colors active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+            </button>
+            {date !== today && (
+              <button
+                type="button"
+                onClick={() => setDate(today)}
+                className="ml-1 text-xs font-bold text-primary hover:underline"
+              >
+                Today
+              </button>
+            )}
+          </div>
+        </Field>
         <p className="text-body-sm text-on-surface-variant pb-2.5">
           The daily schedule syncs automatically from the connected Google Sheet — booked times below vanish from the public booking grid.
         </p>
@@ -2563,7 +2598,11 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
       {/* Manual clinic-wide blocks (closes a time for everyone). */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
         <h3 className="text-headline-sm font-bold text-on-surface mb-1">Clinic-wide blocks</h3>
-        <p className="text-body-sm text-on-surface-variant mb-4">Click a time to close it for <strong>every</strong> therapist (e.g. a clinic break). Separate from the CSV import.</p>
+        <p className="text-body-sm text-on-surface-variant mb-4">
+          {isPast
+            ? 'Past day — the record is locked, blocks are shown read-only.'
+            : <>Click a time to close it for <strong>every</strong> therapist (e.g. a clinic break). Separate from the sheet sync.</>}
+        </p>
         {isSunday ? (
           <p className="text-body-md text-on-surface-variant">Sunday is closed — no slots to manage.</p>
         ) : (
@@ -2571,7 +2610,12 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
             {SLOT_TIMES.map((t) => {
               const b = blockedTimes.has(t);
               return (
-                <button key={t} onClick={() => toggle(t)} className={`py-2.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${b ? 'bg-[#FEE4E2] text-[#B42318] border-[#FDA29B] line-through' : 'bg-transparent text-on-surface border-outline-variant hover:border-primary hover:text-primary'}`}>
+                <button
+                  key={t}
+                  onClick={() => toggle(t)}
+                  disabled={isPast}
+                  className={`py-2.5 rounded-xl text-sm font-bold border transition-all ${isPast ? 'cursor-default opacity-70' : 'active:scale-95'} ${b ? 'bg-[#FEE4E2] text-[#B42318] border-[#FDA29B] line-through' : `bg-transparent text-on-surface border-outline-variant ${isPast ? '' : 'hover:border-primary hover:text-primary'}`}`}
+                >
                   {formatSlot(t)}
                 </button>
               );
@@ -2723,9 +2767,13 @@ const SheetSyncCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showBlocked, setShowBlocked] = useState(false);
 
   const employees = useMemo(() => users.filter((u) => u.role === 'employee'), [users]);
   const nameOf = (id: string) => employees.find((u) => u.id === id)?.name || id;
+
+  // Past dates are always locked; today locks at the server's dayLockTime.
+  const dayLocked = date < todayISO() || (date === todayISO() && Boolean(config?.todayLocked));
 
   // Sheet-sourced blocks already saved for the selected date, per employee.
   const csvByStaff = useMemo(() => {
@@ -2785,7 +2833,9 @@ const SheetSyncCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
             Paste any tab's link from the daily schedule spreadsheet — the server automatically opens{' '}
             <strong>today's weekday tab</strong> (SAT / MON / TUE / …) and re-checks it every minute. Edit the sheet
             and the booking grid, admin and employee dashboards follow automatically. The sheet must be shared as{' '}
-            <strong>"Anyone with the link" (Viewer)</strong>.
+            <strong>"Anyone with the link" (Viewer)</strong>. At <strong>{config?.dayLockTime ?? '17:45'}</strong> each
+            day the sessions lock as the official payroll record — after that, no sheet edit or admin action can
+            change that day.
           </p>
         </div>
       </div>
@@ -2875,42 +2925,55 @@ const SheetSyncCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
         </div>
       )}
 
-      {/* What the sheet blocked for the selected date, per therapist */}
+      {/* Sessions the sheet booked for the selected date — collapsed by default.
+          No clear/delete: from the daily lock time the day's sessions are the
+          official payroll record (total sessions, working days, absences). */}
       {csvByStaff.length > 0 && (
         <div className="mt-5">
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold text-xs">
-              Booked on {prettyAdminDate(date)} (from sheet)
-            </h4>
-            <button
-              onClick={async () => {
-                if (!confirm(`Clear the sheet's blocks for ${prettyAdminDate(date)}? They re-apply on the next sync while connected.`)) return;
-                setBusy(true);
-                try { await clearCsvAvailability(date); onChange(); } finally { setBusy(false); }
-              }}
-              disabled={busy}
-              className="text-[11px] font-bold text-[#B42318] hover:underline disabled:opacity-50"
-            >
-              Clear this day
-            </button>
-          </div>
-          <div className="space-y-2">
-            {csvByStaff.map(([staffId, times]) => {
-              const fullDay = times.length >= SLOT_TIMES.length;
-              return (
-                <div key={staffId} className="flex flex-wrap items-center gap-2 bg-surface-container-high/30 border border-outline-variant/60 rounded-xl px-3 py-2">
-                  <span className="font-bold text-on-surface text-sm min-w-[8rem]">{nameOf(staffId)}</span>
-                  {fullDay ? (
-                    <Pill cls="bg-[#FEE4E2] text-[#B42318]">Unavailable all day</Pill>
-                  ) : (
-                    times.map((t) => (
-                      <span key={t} className="text-[11px] font-bold text-[#B42318] bg-[#FEE4E2] px-2 py-0.5 rounded-full">{formatSlot(t)}</span>
-                    ))
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <button
+            onClick={() => setShowBlocked((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 bg-primary-fixed/40 hover:bg-primary-fixed/70 border border-outline-variant/60 rounded-xl px-4 py-3 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold text-primary">
+              {!showBlocked && <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />}
+              {showBlocked ? 'Hide' : 'Click to view'} booked sessions for {prettyAdminDate(date)}
+              <span className="text-on-surface-variant font-bold">({csvByStaff.length} therapists)</span>
+            </span>
+            <span className="flex items-center gap-2">
+              {dayLocked && (
+                <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708]">
+                  <span className="material-symbols-outlined text-[13px]">lock</span>
+                  Locked · payroll record
+                </span>
+              )}
+              <span className="material-symbols-outlined text-[20px] text-primary">{showBlocked ? 'expand_less' : 'expand_more'}</span>
+            </span>
+          </button>
+          {showBlocked && (
+            <div className="space-y-2 mt-3">
+              {dayLocked && (
+                <p className="text-body-sm text-on-surface-variant">
+                  These sessions locked at {config?.dayLockTime ?? '17:45'} and now count toward each employee's
+                  totals (sessions, working days) for salary — they can no longer be changed or cleared.
+                </p>
+              )}
+              {csvByStaff.map(([staffId, times]) => {
+                const fullDay = times.length >= SLOT_TIMES.length;
+                return (
+                  <div key={staffId} className="flex flex-wrap items-center gap-2 bg-surface-container-high/30 border border-outline-variant/60 rounded-xl px-3 py-2">
+                    <span className="font-bold text-on-surface text-sm min-w-[8rem]">{nameOf(staffId)}</span>
+                    {fullDay ? (
+                      <Pill cls="bg-[#FEE4E2] text-[#B42318]">Unavailable all day</Pill>
+                    ) : (
+                      times.map((t) => (
+                        <span key={t} className="text-[11px] font-bold text-[#B42318] bg-[#FEE4E2] px-2 py-0.5 rounded-full">{formatSlot(t)}</span>
+                      ))
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -660,6 +660,8 @@ export interface SheetConfig {
   last: SheetSyncInfo | null;
   pollSeconds?: number;
   changed?: boolean;
+  dayLockTime?: string; // e.g. '17:45' — after this, today's sessions are the payroll record
+  todayLocked?: boolean;
 }
 
 export async function getAvailabilitySheet(): Promise<SheetConfig> {
