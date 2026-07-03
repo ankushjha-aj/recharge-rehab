@@ -70,6 +70,22 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
   }, [route]);
 
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Close the mobile drawer on Escape and lock body scroll while it's open.
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isMenuOpen]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -102,10 +118,25 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
         }`}
     >
       <div className="flex justify-between items-center px-6 md:px-12 w-full h-16">
-        {/* Brand Logo — full logo.png with RECHARGE + REHABILITATION */}
-        <a href="/" className="flex items-center" aria-label="Recharge Rehabilitation Home">
-          <Logo />
-        </a>
+        {/* Left cluster: mobile hamburger + brand logo */}
+        <div className="flex items-center gap-2">
+          {/* Hamburger — mobile only (below md) */}
+          <button
+            type="button"
+            onClick={() => setIsMenuOpen(true)}
+            className="md:hidden -ml-1 p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary-fixed/60 transition-colors"
+            aria-label="Open menu"
+            aria-expanded={isMenuOpen}
+            aria-controls="mobile-menu"
+          >
+            <span className="material-symbols-outlined text-[26px]">menu</span>
+          </button>
+
+          {/* Brand Logo — desktop only; hidden on phones per design */}
+          <a href="/" className="hidden md:flex items-center" aria-label="Recharge Rehabilitation Home">
+            <Logo />
+          </a>
+        </div>
 
         {/* Navigation Links */}
         <ul className="hidden md:flex space-x-6 items-center">
@@ -138,7 +169,7 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
             href="https://www.instagram.com/recharge_rehab/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 flex items-center justify-center p-1"
+            className="hidden md:flex text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 items-center justify-center p-1"
             title="Instagram"
           >
             <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -150,7 +181,7 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
             href="https://www.linkedin.com/company/recharge-rehab"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 flex items-center justify-center p-1 mr-1"
+            className="hidden md:flex text-on-surface-variant hover:text-primary hover:scale-110 transition-all duration-200 items-center justify-center p-1 mr-1"
             title="LinkedIn"
           >
             <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -158,7 +189,10 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
             </svg>
           </a>
 
-          <ThemeToggle />
+          {/* Theme toggle — desktop only; hidden on phones per design */}
+          <span className="hidden md:block">
+            <ThemeToggle />
+          </span>
 
           {/* CTA Button */}
           <button
@@ -167,6 +201,108 @@ const Navbar: React.FC<NavbarProps> = ({ onBookConsultation, route = '/', onWIP 
           >
             Book Consultation
           </button>
+        </div>
+      </div>
+
+      {/* MOBILE SLIDE-IN DRAWER (below md) */}
+      <div
+        className={`md:hidden fixed inset-0 z-[60] ${isMenuOpen ? '' : 'pointer-events-none'}`}
+        aria-hidden={!isMenuOpen}
+      >
+        {/* Dim overlay */}
+        <div
+          onClick={() => setIsMenuOpen(false)}
+          className={`absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity duration-300 ${
+            isMenuOpen ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+
+        {/* Panel */}
+        <div
+          id="mobile-menu"
+          className={`absolute top-0 left-0 h-full w-[80%] max-w-[320px] bg-background shadow-2xl flex flex-col transition-transform duration-300 ease-out ${
+            isMenuOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          {/* Panel header: logo + close */}
+          <div className="flex items-center justify-between px-5 h-16 border-b border-outline-variant/60 shrink-0">
+            <a href="/" onClick={() => setIsMenuOpen(false)} className="flex items-center" aria-label="Recharge Rehabilitation Home">
+              <Logo />
+            </a>
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(false)}
+              aria-label="Close menu"
+              className="-mr-1 p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary-fixed/60 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[24px]">close</span>
+            </button>
+          </div>
+
+          {/* Links */}
+          <ul className="flex flex-col px-3 py-4 gap-1 overflow-y-auto">
+            {navLinks.map((link) => (
+              <li key={link.label}>
+                <a
+                  href={link.href}
+                  onClick={(e) => {
+                    if (link.label === 'Blog') {
+                      e.preventDefault();
+                      onWIP?.(link.label);
+                    }
+                    setIsMenuOpen(false);
+                  }}
+                  className={`block px-4 py-3 rounded-xl text-base font-bold transition-colors ${
+                    link.label === activeLabel
+                      ? 'bg-primary-fixed text-primary'
+                      : 'text-on-surface-variant hover:bg-primary-fixed/50 hover:text-primary'
+                  }`}
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+
+          {/* Footer: CTA + theme + socials */}
+          <div className="mt-auto px-5 py-4 border-t border-outline-variant/60 flex flex-col gap-4 shrink-0">
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                onBookConsultation?.();
+              }}
+              className="w-full bg-primary text-on-primary py-3 rounded-full font-bold text-xs uppercase tracking-wider active:scale-95 transition-all shadow-md"
+            >
+              Book Consultation
+            </button>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <a
+                  href="https://www.instagram.com/recharge_rehab/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-on-surface-variant hover:text-primary transition-colors"
+                  title="Instagram"
+                >
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+                  </svg>
+                </a>
+                <a
+                  href="https://www.linkedin.com/company/recharge-rehab"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-on-surface-variant hover:text-primary transition-colors"
+                  title="LinkedIn"
+                >
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />
+                  </svg>
+                </a>
+              </div>
+              <ThemeToggle />
+            </div>
+          </div>
         </div>
       </div>
     </nav>
