@@ -28,7 +28,12 @@ const EmployeeDashboard: React.FC<{ user: User; onLogout: () => void }> = ({ use
 
   useEffect(() => {
     document.title = 'My Dashboard - Recharge Rehabilitation';
-    listMySessions().then(setSessions).catch(() => setSessions([]));
+    const load = () => listMySessions().then(setSessions).catch(() => setSessions([]));
+    load();
+    // The server re-reads the availability Google Sheet every 30s; refresh on
+    // the same cadence so schedule changes appear here without a reload.
+    const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   const today = todayStr();

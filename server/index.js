@@ -15,7 +15,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
@@ -244,26 +244,30 @@ async function ensureSeedUsers() {
   // Ensure admins exist
   await pool.query(
     `INSERT INTO users (id, name, password_hash, role) VALUES
-       ('superadmin', 'Super Admin', $1, 'super_admin'),
+       ('superadmin', 'SIDDHARTH AR', $1, 'super_admin'),
        ('ADM001',      'Clinic Admin', $2, 'admin')
      ON CONFLICT (id) DO NOTHING`,
     [hash('super@recharge2026'), hash('admin@recharge2026')],
   );
 
   const empHash = hash('emp@recharge2026');
+  // Names must match the daily schedule Google Sheet exactly (the availability
+  // sync matches sheet columns to employees by name). SHIKHA/SANIYA/KUMKUM are
+  // the special educators (the sheet's lower table); the rest are therapists.
   const employeesToSeed = [
-    ['EMP001', 'SIDDHARTH AJ', 'Speech-Language Therapist'],
-    ['EMP002', 'PRACHI AR', 'Speech-Language Therapist'],
+    ['EMP001', 'SIDDHARTH AR', 'Therapist'],
+    ['EMP002', 'PRACHI AR', 'Therapist'],
     ['EMP003', 'KHUSHALI R3', 'Therapist'],
     ['EMP004', 'ADITI R4', 'Therapist'],
-    ['EMP005', 'SULEKHA R5', 'Behavioural Therapist'],
-    ['EMP006', 'UMAKANTI R1', 'Audiologist / Hearing Specialist'],
+    ['EMP005', 'SULEKHA R5', 'Therapist'],
+    ['EMP006', 'UMAKANTI R1', 'Therapist'],
     ['EMP007', 'AVNI', 'Therapist'],
-    ['EMP008', 'ABHIYANSHI', 'Speech Therapist'],
-    ['EMP009', 'AARTI', 'Behavioural Therapist'],
+    ['EMP008', 'ABHIYANSHI', 'Therapist'],
+    ['EMP009', 'AARTI', 'Therapist'],
     ['EMP010', 'SHIKHA', 'Special Educator'],
     ['EMP011', 'SANIYA', 'Special Educator'],
     ['EMP012', 'KUMKUM', 'Special Educator'],
+    ['EMP013', 'NISHA', 'Therapist'],
   ];
 
   for (const [id, name, specialty] of employeesToSeed) {
@@ -283,7 +287,7 @@ async function ensureSeedUsers() {
       [id, name, specialty],
     );
   }
-  console.log('Seeded and updated default users/staff: superadmin, ADM001, EMP001..EMP012');
+  console.log('Seeded and updated default users/staff: superadmin, ADM001, EMP001..EMP013');
 }
 
 
@@ -400,7 +404,10 @@ async function dayAvailability(date) {
 // Replace the CSV-sourced blocks for a date with a fresh set parsed from the
 // uploaded sheet. `entries` is [{ identifier, times[] }]; identifier matches an
 // employee by login id or (case-insensitive) name. Manual blocks are untouched.
-async function applyCsvAvailability(date, entries) {
+// `replaceAll` clears every csv-sourced block for the date first (used by the
+// Google Sheet sync, where the sheet is the full source of truth for the day —
+// a therapist whose bookings were all removed must have their blocks freed too).
+async function applyCsvAvailability(date, entries, replaceAll = false) {
   if (!date) throw httpErr(400, 'A date is required.');
   const list = Array.isArray(entries) ? entries : [];
   const { rows: emps } = await pool.query(
@@ -435,12 +442,16 @@ async function applyCsvAvailability(date, entries) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const staffIdsToClear = Array.from(new Set(rows.map(r => r.staffId)));
-    if (staffIdsToClear.length > 0) {
-      await client.query(
-        `DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv' AND staff_id = ANY($2::text[])`,
-        [date, staffIdsToClear]
-      );
+    if (replaceAll) {
+      await client.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
+    } else {
+      const staffIdsToClear = Array.from(new Set(rows.map(r => r.staffId)));
+      if (staffIdsToClear.length > 0) {
+        await client.query(
+          `DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv' AND staff_id = ANY($2::text[])`,
+          [date, staffIdsToClear]
+        );
+      }
     }
     for (const r of rows) {
       await client.query(
@@ -464,6 +475,396 @@ async function clearCsvAvailability(date) {
   if (!date) throw httpErr(400, 'A date is required.');
   const { rowCount } = await pool.query(`DELETE FROM blocked_slots WHERE date = $1 AND source = 'csv'`, [date]);
   return { date, removed: rowCount };
+}
+
+// ---- Google Sheet availability sync -----------------------------------------
+/*
+ * Instead of uploading the daily CSV by hand, the admin pastes a Google Sheets
+ * link. The server fetches the sheet as CSV, runs it through the same parser as
+ * the manual upload, and applies the blocks. A background poller re-checks the
+ * sheet every SHEET_POLL_MS so edits in the sheet reach the dashboards within a
+ * minute without anyone clicking anything.
+ */
+const SHEET_POLL_MS = 30_000;
+const SHEET_URL_KEY = 'availability_sheet_url';
+
+// Mirrors SLOT_TIMES / parsing in src/lib/store.ts (kept in sync by hand).
+const SLOT_TIMES = [
+  '10:00', '10:45', '11:30', '12:15', '13:00',
+  '14:00', '14:45', '15:30', '16:15', '17:00',
+];
+const FULL_DAY_WORDS = new Set(['all', 'full', 'off', 'leave', 'busy', 'unavailable', 'holiday', 'closed']);
+
+function normalizeSlotTime(raw) {
+  const s = String(raw).trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  const t = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  return SLOT_TIMES.includes(t) ? t : null;
+}
+
+// Quote-aware CSV → rows of trimmed cells (Google's export quotes cells that
+// contain commas, which a naive split(',') would corrupt). Blank rows dropped.
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; }
+        else inQ = false;
+      } else cell += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      row.push(cell.trim());
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell.trim());
+  rows.push(row);
+  return rows.filter((r) => r.some((c) => c.length > 0));
+}
+
+// Same two formats as the frontend parser: the clinic's multi-column daily
+// sheet (paired [Therapist, TIMESLOTS] columns) or simple rows of
+// `name, time, time, ...`.
+function parseAvailabilityRows(rows) {
+  const isMultiColumn = rows.length >= 3 &&
+    rows[2].some((c) => c.toUpperCase() === 'TIMESLOTS') &&
+    rows[1].some((c) => c.includes('(') && c.includes(')'));
+  if (isMultiColumn) return parseMultiColumnRows(rows);
+
+  const entries = [];
+  const badTimes = [];
+  for (const cellsRaw of rows) {
+    const cells = cellsRaw.filter((c, i) => i === 0 || c.length > 0);
+    const identifier = cells[0];
+    if (!identifier) continue;
+    if (/^(employee|name|staff|therapist|id)$/i.test(identifier) && cells.length <= 1) continue;
+    if (entries.length === 0 && /^(employee|name|staff|therapist|id)$/i.test(identifier)) {
+      const rest = cells.slice(1).join(' ').toLowerCase();
+      if (/time|slot|busy|session/.test(rest)) continue;
+    }
+    const tokens = cells.slice(1).flatMap((c) => c.split(/[\s;]+/)).filter(Boolean);
+    const times = new Set();
+    let fullDay = false;
+    for (const tok of tokens) {
+      if (FULL_DAY_WORDS.has(tok.toLowerCase())) { fullDay = true; continue; }
+      const t = normalizeSlotTime(tok);
+      if (t) times.add(t);
+      else badTimes.push(`${identifier}: "${tok}"`);
+    }
+    if (fullDay) SLOT_TIMES.forEach((t) => times.add(t));
+    if (times.size === 0 && !fullDay) continue;
+    entries.push({ identifier, times: SLOT_TIMES.filter((t) => times.has(t)) });
+  }
+  return { entries, badTimes };
+}
+
+function parseMultiColumnRows(rows) {
+  const entries = [];
+  const badTimes = [];
+  const headers = rows[2];
+  const therapistColumns = [];
+
+  for (let i = 0; i < headers.length; i++) {
+    const name = headers[i];
+    if (!name) continue;
+    const cleanHeader = name.toUpperCase();
+    // 'S.NO' / 'S.NO.' / 'SNO' are serial-number columns, not therapists.
+    if (cleanHeader === 'TIMESLOTS' || cleanHeader.replace(/[.\s]/g, '') === 'SNO' || cleanHeader.startsWith('CANCELLATION')) continue;
+
+    let timeSlotColIdx = -1;
+    if (headers[i + 1] && headers[i + 1].toUpperCase() === 'TIMESLOTS') {
+      timeSlotColIdx = i + 1;
+    } else {
+      for (let j = 1; j <= 2; j++) {
+        if (headers[i + j] && headers[i + j].toUpperCase() === 'TIMESLOTS') { timeSlotColIdx = i + j; break; }
+      }
+      if (timeSlotColIdx === -1) {
+        for (let j = 1; j <= 4; j++) {
+          if (headers[i - j] && headers[i - j].toUpperCase() === 'TIMESLOTS') { timeSlotColIdx = i - j; break; }
+        }
+      }
+    }
+    if (timeSlotColIdx !== -1) therapistColumns.push({ name, colIdx: i, timeSlotColIdx });
+  }
+
+  const canonicalFromSlotText = (slotText) => {
+    const startMatch = String(slotText).match(/^(\d{1,2}:\d{2})/);
+    if (!startMatch) return null;
+    const [hStr, mStr] = startMatch[1].split(':');
+    let h = parseInt(hStr, 10);
+    const m = parseInt(mStr, 10);
+    if (h >= 1 && h < 10) h += 12; // PM shorthand (1:00 → 13:00)
+    const t = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    return SLOT_TIMES.includes(t) ? t : null;
+  };
+
+  const therapistData = new Map();
+  const dataFor = (name) => {
+    if (!therapistData.has(name)) therapistData.set(name, { times: new Set(), reasons: {} });
+    return therapistData.get(name);
+  };
+
+  // Top table: rows 4.. until the lower table's own "TIMESLOTS" header row.
+  // That header's column varies between weekday tabs (col 0 on SAT, col 1 on
+  // FRI, …), so anchor on wherever the TIMESLOTS cell actually sits: educator
+  // names live in the anchor column and their slots in the columns after it.
+  let lowerTableHeaderRowIdx = -1;
+  let lowerAnchorCol = -1;
+  for (let r = 3; r < rows.length; r++) {
+    const c = (rows[r] || []).findIndex((cell) => (cell || '').toUpperCase() === 'TIMESLOTS');
+    if (c !== -1) { lowerTableHeaderRowIdx = r; lowerAnchorCol = c; break; }
+  }
+  const endTopIdx = lowerTableHeaderRowIdx !== -1 ? lowerTableHeaderRowIdx : rows.length;
+
+  for (let rowIdx = 3; rowIdx < endTopIdx; rowIdx++) {
+    const row = rows[rowIdx];
+    if (!row || row.length === 0) continue;
+    for (const col of therapistColumns) {
+      const canonicalTime = canonicalFromSlotText(row[col.timeSlotColIdx] || '');
+      if (!canonicalTime) continue;
+      const cellVal = (row[col.colIdx] || '').trim();
+      if (cellVal.length > 0) {
+        const data = dataFor(col.name);
+        data.times.add(canonicalTime);
+        data.reasons[canonicalTime] = cellVal;
+      }
+    }
+  }
+
+  // Lower table (educators): the anchor column holds the name, header row holds slots.
+  if (lowerTableHeaderRowIdx !== -1) {
+    const timeSlotsRow = rows[lowerTableHeaderRowIdx];
+    const columnTimes = {};
+    for (let c = lowerAnchorCol + 1; c < timeSlotsRow.length; c++) {
+      const t = canonicalFromSlotText(timeSlotsRow[c] || '');
+      if (t) columnTimes[c] = t;
+    }
+    for (let r = lowerTableHeaderRowIdx + 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || row.length === 0) continue;
+      const therapistName = (row[lowerAnchorCol] || '').trim();
+      if (!therapistName || therapistName.toUpperCase().startsWith('GROUP')) continue;
+      for (let c = lowerAnchorCol + 1; c < row.length; c++) {
+        const canonicalTime = columnTimes[c];
+        if (!canonicalTime) continue;
+        const cellVal = (row[c] || '').trim();
+        if (cellVal.length > 0) {
+          const data = dataFor(therapistName);
+          data.times.add(canonicalTime);
+          data.reasons[canonicalTime] = cellVal;
+        }
+      }
+    }
+  }
+
+  for (const [name, data] of therapistData.entries()) {
+    entries.push({ identifier: name, times: SLOT_TIMES.filter((t) => data.times.has(t)), reasons: data.reasons });
+  }
+  return { entries, badTimes };
+}
+
+// The daily sheet carries its own date, e.g. "(13/06/26) SATURDAY." → yyyy-mm-dd.
+function extractSheetDate(rows) {
+  for (const row of rows.slice(0, 4)) {
+    for (const cell of row) {
+      const m = String(cell).match(/\((\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})\)/);
+      if (m) {
+        const dd = m[1].padStart(2, '0');
+        const mm = m[2].padStart(2, '0');
+        const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
+        return `${yyyy}-${mm}-${dd}`;
+      }
+    }
+  }
+  return null;
+}
+
+// Accept any pasted Google Sheets URL and pull out the spreadsheet id + tab gid.
+function parseSheetUrl(url) {
+  const m = String(url).match(/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (!m) return null;
+  const gidMatch = String(url).match(/[#?&]gid=(\d+)/);
+  return { id: m[1], gid: gidMatch ? gidMatch[1] : '0' };
+}
+
+// The clinic keeps one tab per weekday (SAT, MON, TUE, WED, THUR, FRI — no
+// Sunday, the clinic is closed). The htmlview page of a link-shared sheet
+// carries the tab list, which lets us pick today's tab automatically no matter
+// which tab's link was pasted.
+const WEEKDAY_PREFIXES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+async function listSheetTabs(id) {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/htmlview`, { redirect: 'follow' });
+  if (!res.ok) return null;
+  const html = await res.text();
+  const tabs = [];
+  const re = /\{name:\s*"([^"]+)",\s*pageUrl:[^}]*?gid:\s*"(\d+)"/g;
+  let m;
+  while ((m = re.exec(html))) tabs.push({ name: m[1].trim(), gid: m[2] });
+  return tabs.length ? tabs : null;
+}
+
+// Resolve which tab to sync: today's weekday tab when the tab list is readable
+// (names matched on the first three letters — the sheet uses THUR, "WED " etc).
+// Falls back to the gid in the pasted link if the tab list can't be read.
+async function resolveDayTab(ref) {
+  const prefix = WEEKDAY_PREFIXES[new Date().getDay()]; // server runs in clinic-local time
+  const tabs = await listSheetTabs(ref.id).catch(() => null);
+  if (!tabs) return { gid: ref.gid, tab: null, prefix };
+  const match = tabs.find((t) => t.name.toUpperCase().startsWith(prefix));
+  if (!match) return { none: true, prefix, tabs };
+  return { gid: match.gid, tab: match.name, prefix };
+}
+
+async function fetchSheetCsv(url) {
+  const ref = parseSheetUrl(url);
+  if (!ref) throw httpErr(400, 'That does not look like a Google Sheets link.');
+  const day = await resolveDayTab(ref);
+  if (day.none) return { none: true, prefix: day.prefix };
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${ref.id}/export?format=csv&gid=${day.gid}`;
+  const res = await fetch(exportUrl, { redirect: 'follow' });
+  const text = await res.text();
+  if (!res.ok || /<!doctype html>|<html/i.test(text.slice(0, 200))) {
+    throw httpErr(
+      res.status === 200 ? 403 : res.status,
+      'Could not read the sheet. In Google Sheets set Share → General access → "Anyone with the link" (Viewer).',
+    );
+  }
+  return { text, tab: day.tab };
+}
+
+// Last sync outcome, shown in the admin panel. Kept in memory (resets on boot).
+const sheetSync = {
+  running: false,
+  last: null, // { at, ok, error?, date?, blockedSlots?, matched?, unmatched?, changed }
+  lastHash: '',
+};
+
+async function getSheetUrl() {
+  const { rows } = await pool.query('SELECT value FROM global_settings WHERE key = $1', [SHEET_URL_KEY]);
+  return rows[0]?.value || '';
+}
+
+async function setAvailabilitySheet(url) {
+  const clean = String(url || '').trim();
+  if (clean && !parseSheetUrl(clean)) throw httpErr(400, 'That does not look like a Google Sheets link.');
+  await pool.query(
+    `INSERT INTO global_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [SHEET_URL_KEY, clean],
+  );
+  sheetSync.lastHash = ''; // force a real sync on the next run
+  sheetSync.last = null;
+  if (clean) return syncAvailabilitySheet(true);
+  return { url: '', last: null };
+}
+
+async function getAvailabilitySheet() {
+  return { url: await getSheetUrl(), last: sheetSync.last, pollSeconds: SHEET_POLL_MS / 1000 };
+}
+
+// Fetch → (skip if unchanged) → parse → apply. `force` re-applies even when the
+// sheet text hasn't changed (the admin's "Sync now" button).
+async function syncAvailabilitySheet(force = false) {
+  const url = await getSheetUrl();
+  if (!url) throw httpErr(400, 'No Google Sheet link is configured yet.');
+  if (sheetSync.running) return { url, last: sheetSync.last, skipped: 'busy' };
+  sheetSync.running = true;
+  try {
+    const fetched = await fetchSheetCsv(url);
+    if (fetched.none) {
+      // No tab for today's weekday (Sunday) — clinic closed, nothing to sync.
+      sheetSync.last = {
+        at: new Date().toISOString(),
+        ok: true,
+        note: `No "${fetched.prefix}" tab in the spreadsheet — clinic closed today, nothing synced.`,
+        changed: false,
+      };
+      return { url, last: sheetSync.last, changed: false };
+    }
+    const { text, tab } = fetched;
+    const hash = createHash('sha256').update(text).digest('hex');
+    if (!force && hash === sheetSync.lastHash) {
+      return { url, last: sheetSync.last, changed: false };
+    }
+    const rows = parseCsvRows(text);
+    // Server-local today (plain toISOString() is UTC and would flip the day
+    // back during the early IST morning).
+    const now = new Date();
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    // A header date in the past means the tab still holds last week's schedule
+    // (the receptionist hasn't filled today in yet) — show nothing rather than
+    // stale data, and keep checking until the date cell is updated.
+    const sheetDate = extractSheetDate(rows);
+    if (sheetDate && sheetDate < today) {
+      sheetSync.lastHash = hash; // cache: no point re-parsing the same stale text every minute
+      sheetSync.last = {
+        at: new Date().toISOString(),
+        ok: true,
+        note: `The ${tab ? `"${tab}" ` : ''}tab's header still shows ${sheetDate} — waiting for today's schedule (update the date cell in the sheet).`,
+        tab,
+        sheetDate,
+        changed: false,
+      };
+      return { url, last: sheetSync.last, changed: false };
+    }
+    // No parseable header date: apply to today rather than dying on a
+    // formatting slip in the date cell.
+    const date = sheetDate || today;
+    const { entries, badTimes } = parseAvailabilityRows(rows);
+    const result = await applyCsvAvailability(date, entries, true);
+    sheetSync.lastHash = hash;
+    sheetSync.last = {
+      at: new Date().toISOString(),
+      ok: true,
+      date,
+      tab,
+      sheetDate,
+      dateAdjusted: !sheetDate, // no header date found — fell back to today
+      blockedSlots: result.blockedSlots,
+      matched: result.matched,
+      unmatched: result.unmatched,
+      badTimes,
+      changed: true,
+    };
+    return { url, last: sheetSync.last, changed: true };
+  } catch (e) {
+    sheetSync.last = { at: new Date().toISOString(), ok: false, error: String(e.message || e) };
+    throw e;
+  } finally {
+    sheetSync.running = false;
+  }
+}
+
+// Background poller: keeps the dashboards in step with the sheet without any
+// clicks. Errors are recorded on sheetSync.last and shown in the admin panel.
+function startSheetPoller() {
+  setInterval(async () => {
+    try {
+      if (await getSheetUrl()) await syncAvailabilitySheet(false);
+    } catch (e) {
+      console.error('Sheet sync error:', String(e.message || e));
+    }
+  }, SHEET_POLL_MS);
 }
 
 async function listUsers() {
@@ -988,6 +1389,9 @@ async function route(action, payload, token) {
     case 'removeBlocked': adminOnly(); return removeBlocked(payload.id);
     case 'applyCsvAvailability': adminOnly(); return applyCsvAvailability(payload.date, payload.entries);
     case 'clearCsvAvailability': adminOnly(); return clearCsvAvailability(payload.date);
+    case 'getAvailabilitySheet': adminOnly(); return getAvailabilitySheet();
+    case 'setAvailabilitySheet': adminOnly(); return setAvailabilitySheet(payload.url);
+    case 'syncAvailabilitySheet': adminOnly(); return syncAvailabilitySheet(Boolean(payload && payload.force));
 
     case 'listUsers': adminOnly(); return listUsers();
     case 'createUser': adminOnly(); return createUser(user, payload);
@@ -1049,4 +1453,7 @@ app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 ensureSchema()
   .then(ensureSeedUsers)
   .catch((e) => console.error('Boot/seed error:', e))
-  .finally(() => app.listen(PORT, () => console.log(`Recharge server (site + API) listening on :${PORT}`)));
+  .finally(() => {
+    startSheetPoller();
+    app.listen(PORT, () => console.log(`Recharge server (site + API) listening on :${PORT}`));
+  });

@@ -202,7 +202,8 @@ function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[
     if (!name) continue;
     
     const cleanHeader = name.toUpperCase();
-    if (cleanHeader === 'TIMESLOTS' || cleanHeader === 'S.NO' || cleanHeader.startsWith('CANCELLATION')) {
+    // 'S.NO' / 'S.NO.' / 'SNO' are serial-number columns, not therapists.
+    if (cleanHeader === 'TIMESLOTS' || cleanHeader.replace(/[.\s]/g, '') === 'SNO' || cleanHeader.startsWith('CANCELLATION')) {
       continue;
     }
 
@@ -236,11 +237,16 @@ function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[
   // Map to store times and reasons per therapist
   const therapistData = new Map<string, { times: Set<string>; reasons: Record<string, string> }>();
 
-  // Parse top table rows starting from Row 4 (index 3) until we hit the lower table header
+  // Parse top table rows starting from Row 4 (index 3) until we hit the lower table header.
+  // The lower header's column varies between weekday tabs (col 0 on SAT, col 1 on FRI),
+  // so anchor on wherever the TIMESLOTS cell actually sits.
   let lowerTableHeaderRowIdx = -1;
+  let lowerAnchorCol = -1;
   for (let r = 3; r < rows.length; r++) {
-    if (rows[r] && rows[r][0] && rows[r][0].toUpperCase() === 'TIMESLOTS') {
+    const c = (rows[r] || []).findIndex((cell) => (cell || '').toUpperCase() === 'TIMESLOTS');
+    if (c !== -1) {
       lowerTableHeaderRowIdx = r;
+      lowerAnchorCol = c;
       break;
     }
   }
@@ -288,7 +294,7 @@ function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[
     const timeSlotsRow = rows[lowerTableHeaderRowIdx];
     const columnTimes: { [colIdx: number]: string } = {};
 
-    for (let c = 1; c < timeSlotsRow.length; c++) {
+    for (let c = lowerAnchorCol + 1; c < timeSlotsRow.length; c++) {
       const slotText = timeSlotsRow[c];
       if (!slotText) continue;
       const startMatch = slotText.match(/^(\d{1,2}:\d{2})/);
@@ -309,12 +315,12 @@ function parseMultiColumnCsv(rows: string[][]): { entries: CsvAvailabilityEntry[
       const row = rows[r];
       if (!row || row.length === 0) continue;
 
-      const therapistName = row[0]?.trim();
+      const therapistName = row[lowerAnchorCol]?.trim();
       if (!therapistName || therapistName.toUpperCase().startsWith('GROUP')) {
         continue;
       }
 
-      for (let c = 1; c < row.length; c++) {
+      for (let c = lowerAnchorCol + 1; c < row.length; c++) {
         const canonicalTime = columnTimes[c];
         if (!canonicalTime) continue;
 
@@ -373,17 +379,21 @@ export function takenTimesFor(avail: DayAvailability, specialistId: string, spec
 }
 
 // Local-only fallback specialist list (used when no backend is configured).
+// Mirrors the server seed: names match the daily schedule Google Sheet.
 export const DEFAULT_STAFF: Staff[] = [
-  { id: 'EMP001', name: 'Employee 1', role: 'Speech-Language Therapist', active: true },
-  { id: 'EMP002', name: 'Employee 2', role: 'Speech-Language Therapist', active: true },
-  { id: 'EMP003', name: 'Employee 3', role: 'Special Educator', active: true },
-  { id: 'EMP004', name: 'Employee 4', role: 'Special Educator', active: true },
-  { id: 'EMP005', name: 'Employee 5', role: 'Behavioural Therapist', active: true },
-  { id: 'EMP006', name: 'Employee 6', role: 'Audiologist / Hearing Specialist', active: true },
-  { id: 'EMP007', name: 'Employee 7', role: 'Special Educator', active: true },
-  { id: 'EMP008', name: 'Employee 8', role: 'Speech Therapist', active: true },
-  { id: 'EMP009', name: 'Employee 9', role: 'Counselor / Parent Trainer', active: true },
-  { id: 'EMP010', name: 'Employee 10', role: 'Counselor / Parent Trainer', active: true },
+  { id: 'EMP001', name: 'SIDDHARTH AR', role: 'Therapist', active: true },
+  { id: 'EMP002', name: 'PRACHI AR', role: 'Therapist', active: true },
+  { id: 'EMP003', name: 'KHUSHALI R3', role: 'Therapist', active: true },
+  { id: 'EMP004', name: 'ADITI R4', role: 'Therapist', active: true },
+  { id: 'EMP005', name: 'SULEKHA R5', role: 'Therapist', active: true },
+  { id: 'EMP006', name: 'UMAKANTI R1', role: 'Therapist', active: true },
+  { id: 'EMP007', name: 'AVNI', role: 'Therapist', active: true },
+  { id: 'EMP008', name: 'ABHIYANSHI', role: 'Therapist', active: true },
+  { id: 'EMP009', name: 'AARTI', role: 'Therapist', active: true },
+  { id: 'EMP010', name: 'SHIKHA', role: 'Special Educator', active: true },
+  { id: 'EMP011', name: 'SANIYA', role: 'Special Educator', active: true },
+  { id: 'EMP012', name: 'KUMKUM', role: 'Special Educator', active: true },
+  { id: 'EMP013', name: 'NISHA', role: 'Therapist', active: true },
 ];
 
 // --- config -----------------------------------------------------------------
@@ -623,6 +633,45 @@ export async function applyCsvAvailability(date: string, entries: CsvAvailabilit
 export async function clearCsvAvailability(date: string): Promise<{ date: string; removed: number }> {
   requireRemote();
   return remote<{ date: string; removed: number }>('clearCsvAvailability', { date });
+}
+
+// --- Google Sheet availability sync ------------------------------------------
+// The server fetches the configured sheet, parses it with the same rules as the
+// manual CSV upload and re-applies the blocks; it also re-checks the sheet on a
+// timer so edits propagate without any clicks.
+export interface SheetSyncInfo {
+  at: string;
+  ok: boolean;
+  error?: string;
+  note?: string;
+  date?: string;
+  tab?: string | null;
+  sheetDate?: string | null;
+  dateAdjusted?: boolean;
+  blockedSlots?: number;
+  matched?: { identifier: string; staffId: string; name: string; count: number }[];
+  unmatched?: string[];
+  badTimes?: string[];
+  changed?: boolean;
+}
+export interface SheetConfig {
+  url: string;
+  last: SheetSyncInfo | null;
+  pollSeconds?: number;
+  changed?: boolean;
+}
+
+export async function getAvailabilitySheet(): Promise<SheetConfig> {
+  requireRemote();
+  return remote<SheetConfig>('getAvailabilitySheet', {});
+}
+export async function setAvailabilitySheet(url: string): Promise<SheetConfig> {
+  requireRemote();
+  return remote<SheetConfig>('setAvailabilitySheet', { url });
+}
+export async function syncAvailabilitySheet(force = true): Promise<SheetConfig> {
+  requireRemote();
+  return remote<SheetConfig>('syncAvailabilitySheet', { force });
 }
 
 // ===========================================================================

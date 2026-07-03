@@ -18,9 +18,11 @@ import {
   listBlocked,
   addBlocked,
   removeBlocked,
-  applyCsvAvailability,
   clearCsvAvailability,
-  parseAvailabilityCsv,
+  getAvailabilitySheet,
+  setAvailabilitySheet,
+  syncAvailabilitySheet,
+  type SheetConfig,
   todayISO,
   dayAvailability,
   isStaffBusyAt,
@@ -33,7 +35,6 @@ import {
   type User,
   type Role,
   type BlockedSlot,
-  type CsvApplyResult,
   updateMyProfile,
   listMySessions,
   executeDbQuery,
@@ -2527,6 +2528,13 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
     load(date);
   }, [date, load]);
 
+  // Near-real-time: the server re-reads the Google Sheet every 30s, so
+  // refresh this view on the same cadence to pick up whatever it applied.
+  useEffect(() => {
+    const id = setInterval(() => load(date), 30_000);
+    return () => clearInterval(id);
+  }, [date, load]);
+
   const blockedTimes = new Set(blocked.filter((b) => b.staffId === 'any').map((b) => b.time));
   const toggle = async (time: string) => {
     if (blockedTimes.has(time)) await removeBlocked(`${date}|${time}|any`);
@@ -2540,11 +2548,11 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Date"><input type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
         <p className="text-body-sm text-on-surface-variant pb-2.5">
-          Upload the morning's schedule below to block each therapist's booked times for this date.
+          The daily schedule syncs automatically from the connected Google Sheet — booked times below vanish from the public booking grid.
         </p>
       </div>
 
-      <CsvImportCard date={date} users={users} blocked={blocked} onChange={() => load(date)} />
+      <SheetSyncCard date={date} users={users} blocked={blocked} onChange={() => load(date)} />
 
       {/* Manual clinic-wide blocks (closes a time for everyone). */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
@@ -2569,18 +2577,24 @@ const AvailabilityTab: React.FC<{ users: User[] }> = ({ users }) => {
   );
 };
 
-// Daily CSV importer: upload a sheet of each therapist's booked times → block them.
-const CsvImportCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlot[]; onChange: () => void }> = ({ date, users, blocked, onChange }) => {
+// Google Sheet link: the server pulls the daily schedule straight from the
+// sheet and re-checks it every minute, so edits in the sheet reach the
+// dashboards without anyone uploading anything.
+const SheetSyncCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlot[]; onChange: () => void }> = ({
+  date,
+  users,
+  blocked,
+  onChange,
+}) => {
+  const [config, setConfig] = useState<SheetConfig | null>(null);
+  const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<CsvApplyResult | null>(null);
-  const [warn, setWarn] = useState<string>('');
-  const [err, setErr] = useState('');
-  const fileRef = React.useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
 
   const employees = useMemo(() => users.filter((u) => u.role === 'employee'), [users]);
   const nameOf = (id: string) => employees.find((u) => u.id === id)?.name || id;
 
-  // CSV blocks already saved for this date, grouped by employee.
+  // Sheet-sourced blocks already saved for the selected date, per employee.
   const csvByStaff = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const b of blocked) {
@@ -2590,112 +2604,155 @@ const CsvImportCard: React.FC<{ date: string; users: User[]; blocked: BlockedSlo
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [blocked]);
 
-  const handleFile = async (file: File) => {
-    setErr('');
-    setWarn('');
-    setResult(null);
-    setBusy(true);
+  const refresh = useCallback(async () => {
     try {
-      const text = await file.text();
-      const { entries, badTimes } = parseAvailabilityCsv(text);
-      if (entries.length === 0) {
-        setErr('No usable rows found. Each line should be: employee id (or name), then their booked times.');
-        return;
-      }
-      const res = await applyCsvAvailability(date, entries);
-      setResult(res);
-      if (badTimes.length) setWarn(`Ignored ${badTimes.length} unrecognised time(s): ${badTimes.slice(0, 6).join(', ')}${badTimes.length > 6 ? '…' : ''}`);
+      const c = await getAvailabilitySheet();
+      setConfig(c);
+      setUrl((prev) => (prev ? prev : c.url));
+    } catch {
+      /* remote backend not configured — card still renders, actions will explain */
+    }
+  }, []);
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const run = async (fn: () => Promise<SheetConfig>) => {
+    setBusy(true);
+    setError('');
+    try {
+      setConfig(await fn());
       onChange();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
-  const downloadTemplate = () => {
-    const lines = ['employee,times', ...employees.map((u) => `${u.id},`)];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `availability-${date}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const clearCsv = async () => {
-    if (!confirm(`Clear all uploaded availability for ${date}? Manual clinic-wide blocks stay.`)) return;
-    setBusy(true);
-    try {
-      await clearCsvAvailability(date);
-      setResult(null);
-      onChange();
+      setError(e instanceof Error ? e.message : String(e));
+      refresh();
     } finally {
       setBusy(false);
     }
   };
+
+  const connected = Boolean(config?.url);
+  const last = config?.last;
 
   return (
     <div className="bg-surface-container-lowest border border-outline-variant rounded-[1.5rem] p-5 md:p-7 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-headline-sm font-bold text-on-surface mb-1 flex items-center gap-2">
-            <span className="material-symbols-outlined text-[22px] text-primary">upload_file</span>
-            Daily availability upload
+            Google Sheet sync
+            {connected && (
+              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${last && !last.ok ? 'bg-[#FEE4E2] text-[#B42318]' : 'bg-primary-fixed text-primary'}`}>
+                {last && !last.ok ? 'Error' : 'Connected'}
+              </span>
+            )}
           </h3>
-          <p className="text-body-sm text-on-surface-variant max-w-xl">
-            Upload each morning's CSV of therapists' booked times. Those slots vanish from the public booking grid for
-            <strong> {prettyAdminDate(date)}</strong>. Re-uploading replaces this day's import.
+          <p className="text-body-sm text-on-surface-variant mb-4 max-w-2xl">
+            Paste any tab's link from the daily schedule spreadsheet — the server automatically opens{' '}
+            <strong>today's weekday tab</strong> (SAT / MON / TUE / …) and re-checks it every minute. Edit the sheet
+            and the booking grid, admin and employee dashboards follow automatically. The sheet must be shared as{' '}
+            <strong>"Anyone with the link" (Viewer)</strong>.
           </p>
         </div>
-        <button onClick={downloadTemplate} className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary px-3.5 py-2 rounded-full font-bold text-xs transition-colors">
-          <span className="material-symbols-outlined text-[16px]">download</span>Template
-        </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <label className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm cursor-pointer transition-all active:scale-95 ${busy ? 'bg-surface-container-high text-on-surface-variant cursor-wait' : 'bg-primary text-on-primary hover:brightness-95 shadow-md'}`}>
-          <span className="material-symbols-outlined text-[18px]">{busy ? 'hourglass_top' : 'upload'}</span>
-          {busy ? 'Uploading…' : 'Upload CSV'}
-          <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" disabled={busy} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-        </label>
-        {csvByStaff.length > 0 && (
-          <button onClick={clearCsv} disabled={busy} className="flex items-center gap-1.5 border border-[#FDA29B] text-[#B42318] hover:bg-[#FEE4E2] px-4 py-2 rounded-full font-bold text-sm transition-colors disabled:opacity-60">
-            <span className="material-symbols-outlined text-[16px]">delete_sweep</span>Clear upload
-          </button>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://docs.google.com/spreadsheets/d/…"
+          disabled={busy}
+          className={`${inputCls} flex-1 min-w-[260px]`}
+        />
+        <button
+          onClick={() => run(() => setAvailabilitySheet(url.trim()))}
+          disabled={busy || !url.trim() || url.trim() === config?.url}
+          className="bg-primary text-on-primary px-4 py-2 rounded-full font-bold text-sm transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+        >
+          {busy ? 'Working…' : connected ? 'Update link' : 'Connect sheet'}
+        </button>
+        {connected && (
+          <>
+            <button
+              onClick={() => run(() => syncAvailabilitySheet(true))}
+              disabled={busy}
+              className="flex items-center gap-1.5 border border-outline-variant text-on-surface hover:border-primary hover:text-primary px-4 py-2 rounded-full font-bold text-sm transition-colors disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">sync</span>
+              Sync now
+            </button>
+            <button
+              onClick={() => { setUrl(''); run(() => setAvailabilitySheet('')); }}
+              disabled={busy}
+              className="flex items-center gap-1.5 border border-[#FDA29B] text-[#B42318] hover:bg-[#FEE4E2] px-4 py-2 rounded-full font-bold text-sm transition-colors disabled:opacity-50"
+            >
+              Disconnect
+            </button>
+          </>
         )}
       </div>
 
-      {/* Format hint */}
-      <details className="mt-4 group">
-        <summary className="cursor-pointer text-body-sm font-bold text-primary select-none">CSV format</summary>
-        <div className="mt-2 text-body-sm text-on-surface-variant space-y-1">
-          <p>One row per therapist: their <strong>id or name</strong> first, then their booked times (comma or space separated).</p>
-          <pre className="bg-surface-container-high/50 border border-outline-variant rounded-xl p-3 text-xs text-on-surface overflow-x-auto">{`employee,times
-e1,10:00 10:45 11:30
-e3,12:15, 13:00
-Employee 5,all`}</pre>
-          <p>Times accept <code>10:00</code>, <code>10am</code> or <code>10:00 AM</code>. Use <code>all</code> / <code>leave</code> / <code>off</code> to block a therapist's whole day.</p>
-        </div>
-      </details>
+      {error && <p className="mt-3 text-body-sm font-bold text-[#B42318]">{error}</p>}
 
-      {err && <p className="mt-3 text-body-sm text-[#B42318] flex items-center gap-1.5"><span className="material-symbols-outlined text-[18px]">error</span>{err}</p>}
-      {warn && <p className="mt-3 text-body-sm text-[#B54708] flex items-center gap-1.5"><span className="material-symbols-outlined text-[18px]">warning</span>{warn}</p>}
-      {result && (
-        <div className="mt-3 bg-[#D1FADF]/40 border border-[#A6F4C5] rounded-xl px-4 py-3 text-body-sm text-[#027A48]">
-          ✓ Blocked <strong>{result.blockedSlots}</strong> slot{result.blockedSlots === 1 ? '' : 's'} across <strong>{result.matched.length}</strong> therapist{result.matched.length === 1 ? '' : 's'}.
-          {result.unmatched.length > 0 && (
-            <span className="text-[#B42318]"> Couldn't match: {result.unmatched.join(', ')} — check the id/name spelling.</span>
+      {connected && last && (
+        <div className="mt-4 text-body-sm text-on-surface-variant space-y-1">
+          {last.ok ? (
+            <>
+              <p>
+                <span className="font-bold text-on-surface">Last sync:</span>{' '}
+                {new Date(last.at).toLocaleTimeString()}
+                {last.note
+                  ? <> — {last.note}</>
+                  : <>
+                      {' '}— {last.blockedSlots ?? 0} slots blocked for{' '}
+                      <span className="font-bold text-on-surface">{last.date && prettyAdminDate(last.date)}</span>
+                      {last.tab && <> from tab <span className="font-bold text-on-surface">{last.tab}</span></>}
+                      {' '}({(last.matched ?? []).length} therapists matched)
+                    </>}
+              </p>
+              {last.dateAdjusted && (
+                <p className="text-[#B54708]">
+                  <span className="font-bold">Note:</span> no date was found in the sheet's header, so the schedule was
+                  applied to <span className="font-bold">today</span>. Keep a date like (04/07/2026) in the tab's second row.
+                </p>
+              )}
+              {(last.unmatched ?? []).length > 0 && (
+                <p className="text-[#B42318]">
+                  <span className="font-bold">Not matched to any employee:</span> {(last.unmatched ?? []).join(', ')}
+                  {' '}— add them in Employees or fix the name in the sheet.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[#B42318]">
+              <span className="font-bold">Last sync failed</span> ({new Date(last.at).toLocaleTimeString()}): {last.error}
+            </p>
           )}
+          <p className="text-[11px] opacity-70">Auto-checks the sheet every {config?.pollSeconds ?? 60} seconds.</p>
         </div>
       )}
 
-      {/* What's currently blocked by the upload */}
+      {/* What the sheet blocked for the selected date, per therapist */}
       {csvByStaff.length > 0 && (
         <div className="mt-5">
-          <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold mb-2 text-xs">Booked today (from upload)</h4>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-label-md uppercase tracking-wider text-primary font-extrabold text-xs">
+              Booked on {prettyAdminDate(date)} (from sheet)
+            </h4>
+            <button
+              onClick={async () => {
+                if (!confirm(`Clear the sheet's blocks for ${prettyAdminDate(date)}? They re-apply on the next sync while connected.`)) return;
+                setBusy(true);
+                try { await clearCsvAvailability(date); onChange(); } finally { setBusy(false); }
+              }}
+              disabled={busy}
+              className="text-[11px] font-bold text-[#B42318] hover:underline disabled:opacity-50"
+            >
+              Clear this day
+            </button>
+          </div>
           <div className="space-y-2">
             {csvByStaff.map(([staffId, times]) => {
               const fullDay = times.length >= SLOT_TIMES.length;
